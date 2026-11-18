@@ -1,0 +1,45 @@
+.resizable-row {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  gap: 0;
+}
+
+.resizable-row__panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.resizable-row__splitter {
+  position: relative;
+  flex: 0 0 6px;
+  cursor: col-resize;
+  touch-action: none;
+  outline: none;
+}
+
+.resizable-row__splitter::after {
+  content: '';
+  position: absolute;
+  top: var(--space-3);
+  bottom: var(--space-3);
+  left: 50%;
+  width: 2px;
+  transform: translateX(-50%);
+  border-radius: var(--radius-pill);
+  background: transparent;
+  transition: background var(--motion-fast) ease;
+}
+
+.resizable-row__splitter:hover::after,
+.resizable-row__splitter:focus-visible::after,
+body.is-resizing .resizable-row__splitter::after {
+  background: var(--color-accent);
+}
+
+body.is-resizing {
+  cursor: col-resize;
+  user-select: none;
+}

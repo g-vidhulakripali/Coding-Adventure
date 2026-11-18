@@ -1,0 +1,52 @@
+.mode-switcher {
+  display: inline-flex;
+  padding: 3px;
+  gap: 2px;
+  border-radius: var(--radius-md);
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-border);
+}
+
+.mode-switcher__option {
+  display: inline-grid;
+  place-items: center;
+  width: 34px;
+  height: 26px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--color-text-faint);
+  transition:
+    background var(--motion-fast) ease,
+    color var(--motion-fast) ease;
+}
+
+.mode-switcher__option:hover {
+  color: var(--color-text-muted);
+}
+
+.mode-switcher__option[aria-checked='true'] {
+  background: var(--color-surface);
+  color: var(--color-text);
+  box-shadow: var(--shadow-sm);
+}
+
+.mode-glyph rect {
+  fill: currentColor;
+  opacity: 0.35;
+}
+
+.mode-switcher__option[aria-checked='true'] .mode-glyph__code {
+  fill: var(--lab-variable);
+  opacity: 1;
+}
+
+.mode-switcher__option[aria-checked='true'] .mode-glyph__lab {
+  fill: var(--lab-function);
+  opacity: 1;
+}
+
+.mode-switcher__option[aria-checked='true'] .mode-glyph__explain {
+  fill: var(--lab-loop);
+  opacity: 1;
+}

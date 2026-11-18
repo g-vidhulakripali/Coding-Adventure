@@ -1,0 +1,46 @@
+.app-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  height: var(--header-height);
+  padding: 0 var(--space-3);
+  flex: none;
+  min-width: 0;
+}
+
+.app-header__brand {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--color-text);
+  text-decoration: none;
+  flex: none;
+  border-radius: var(--radius-sm);
+}
+
+.app-header__name {
+  font-weight: 800;
+  font-size: var(--text-lg);
+  letter-spacing: -0.01em;
+}
+
+.app-header__center {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.app-header__controls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: none;
+}
+
+@media (max-width: 640px) {
+  .app-header__name {
+    display: none;
+  }
+}

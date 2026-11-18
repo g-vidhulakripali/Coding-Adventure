@@ -1,0 +1,123 @@
+.lab-empty {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  max-width: 640px;
+  margin: 0 auto;
+  padding: var(--space-5) var(--space-4);
+  /* Dotted "lab bench" backdrop; purely decorative. */
+  background-image: radial-gradient(circle, var(--color-border) 1px, transparent 1.2px);
+  background-size: 18px 18px;
+  min-height: 100%;
+}
+
+.lab-empty__intro {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  border: 1px dashed var(--color-border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+}
+
+.lab-empty__intro h3 {
+  font-size: var(--text-lg);
+}
+
+.lab-empty__intro p {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.vocab__title {
+  margin-bottom: var(--space-2);
+  color: var(--color-text-faint);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.vocab__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.vocab__item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  transition:
+    transform var(--motion-normal) var(--ease-spring),
+    box-shadow var(--motion-normal) ease;
+}
+
+.vocab__item:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+}
+
+.vocab__glyph svg {
+  display: block;
+  width: 56px;
+  height: 36px;
+}
+
+.vocab__text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  line-height: var(--line-tight);
+}
+
+.vocab__text strong {
+  margin-bottom: 2px;
+  color: var(--color-text);
+  font-size: var(--text-sm);
+}
+
+/* Glyph parts take the item's colour (currentColor). */
+.vg-fill {
+  fill: currentColor;
+}
+
+.vg-stroke {
+  fill: color-mix(in srgb, currentColor 12%, transparent);
+  stroke: currentColor;
+  stroke-width: 2;
+}
+
+.vg-value {
+  fill: var(--lab-value);
+}
+
+.vg-hole {
+  fill: var(--color-surface);
+}
+
+.vg-motion {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  stroke-dasharray: 3 4;
+}
+
+.vg-thick {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}

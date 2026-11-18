@@ -1,0 +1,26 @@
+.evidence-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, currentColor 12%, transparent);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
+.evidence-badge__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+/* Simulated results get a dashed outline so they never read as fact. */
+.evidence-badge--simulated {
+  outline: 1px dashed currentColor;
+  outline-offset: -1px;
+}

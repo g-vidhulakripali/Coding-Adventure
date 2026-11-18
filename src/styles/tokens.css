@@ -1,0 +1,279 @@
+/*
+ * Code Playground design tokens.
+ *
+ * One source of truth for colour, type, spacing, radius, elevation and motion.
+ * Components reference tokens only — never raw colours — so light/dark themes
+ * and reduced motion work everywhere automatically.
+ *
+ * Palette idea: a bright "playground" set of six hues, each owning one role in
+ * the visual laboratory, on calm neutral surfaces so code stays readable.
+ */
+
+:root {
+  /* ---- Brand hues ------------------------------------------------------ */
+  --hue-violet: #6d4aff;
+  --hue-sun: #f5b700;
+  --hue-mint: #0fb88a;
+  --hue-coral: #ef476f;
+  --hue-sky: #1785c4;
+  --hue-tangerine: #f57c1f;
+  --hue-teal: #12a5a5;
+
+  /* ---- Surfaces & text (light) ---------------------------------------- */
+  --color-bg: #f5f3fd;
+  --color-surface: #ffffff;
+  --color-surface-2: #f0edfb;
+  --color-surface-3: #e6e1f8;
+  --color-border: #e0dbf3;
+  --color-border-strong: #c9c1ea;
+  --color-text: #1d1a2e;
+  --color-text-muted: #625e7c;
+  --color-text-faint: #8e89aa;
+  --color-accent: var(--hue-violet);
+  --color-accent-soft: #ece6ff;
+  --color-accent-contrast: #ffffff;
+  --color-focus: #6d4aff;
+  --color-danger: #c62f55;
+  --color-warning-bg: #fff4d6;
+  --color-warning-text: #7a5600;
+
+  /* ---- Visual-laboratory roles ---------------------------------------- */
+  --lab-variable: var(--hue-sky);
+  --lab-value: var(--hue-sun);
+  --lab-collection: var(--hue-teal);
+  --lab-function: var(--hue-violet);
+  --lab-decision: var(--hue-tangerine);
+  --lab-loop: var(--hue-mint);
+  --lab-return: var(--hue-coral);
+
+  /* ---- Evidence levels ------------------------------------------------- */
+  --evidence-verified: #138a5e;
+  --evidence-static: #1f6fd1;
+  --evidence-inferred: #b7791f;
+  --evidence-simulated: #7c4dff;
+  --evidence-unsupported: #7b7790;
+
+  /* ---- File categories ------------------------------------------------- */
+  --cat-python: #3572a5;
+  --cat-notebook: #e46e1b;
+  --cat-image: #c2418f;
+  --cat-data: #0f9a8c;
+  --cat-config: #b07a12;
+  --cat-doc: #6b6785;
+  --cat-web: #d0473a;
+  --cat-deps: #7a52d6;
+  --cat-other: #9a96ad;
+
+  /* ---- Code viewer ----------------------------------------------------- */
+  --code-bg: #fdfcff;
+  --code-gutter-bg: #f6f4fd;
+  --code-gutter-text: #a7a2c2;
+  --code-active-line: #f3f0ff;
+  --code-selection: #d9d0ff;
+  --code-highlight-line: #fff1c2;
+  --code-highlight-edge: var(--hue-sun);
+  --code-highlight-mark: #ffd96b;
+
+  --syn-keyword: #8b2fc9;
+  --syn-def: #1d5fc9;
+  --syn-string: #0d7d55;
+  --syn-number: #c2410c;
+  --syn-comment: #8a86a3;
+  --syn-builtin: #0e7490;
+  --syn-operator: #6b6785;
+  --syn-decorator: #b4541a;
+  --syn-property: #3e3a5a;
+  --syn-invalid: #c62f55;
+
+  /* ---- Typography ------------------------------------------------------ */
+  --font-sans: 'Inter', 'Segoe UI', system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', ui-monospace, 'SFMono-Regular', Consolas, monospace;
+  --text-xs: 0.75rem;
+  --text-sm: 0.8125rem;
+  --text-md: 0.875rem;
+  --text-lg: 1rem;
+  --text-xl: 1.25rem;
+  --text-2xl: 1.75rem;
+  --text-3xl: clamp(2rem, 4vw, 3rem);
+  --code-font-size: 13.5px;
+  --line-tight: 1.25;
+  --line-normal: 1.5;
+
+  /* ---- Spacing / radius / elevation ----------------------------------- */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --radius-pill: 999px;
+  --shadow-sm: 0 1px 2px rgb(40 26 110 / 0.06);
+  --shadow-md: 0 4px 16px rgb(40 26 110 / 0.08), 0 1px 3px rgb(40 26 110 / 0.06);
+  --shadow-lg: 0 16px 40px rgb(40 26 110 / 0.14);
+
+  /* ---- Layout ---------------------------------------------------------- */
+  --header-height: 52px;
+  --panel-header-height: 40px;
+  --rail-width: 40px;
+
+  /* ---- Motion ---------------------------------------------------------- */
+  --motion-fast: 120ms;
+  --motion-normal: 220ms;
+  --motion-slow: 420ms;
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+
+  color-scheme: light;
+}
+
+/* ---- Dark theme: follows the OS unless the user picked light ----------- */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --color-bg: #11101a;
+    --color-surface: #1a1925;
+    --color-surface-2: #222031;
+    --color-surface-3: #2c2a3f;
+    --color-border: #2e2c42;
+    --color-border-strong: #45425f;
+    --color-text: #ece9ff;
+    --color-text-muted: #a8a4c6;
+    --color-text-faint: #7b7798;
+    --color-accent: #9a80ff;
+    --color-accent-soft: #2e2752;
+    --color-accent-contrast: #12101c;
+    --color-focus: #a891ff;
+    --color-danger: #ff7a9a;
+    --color-warning-bg: #3a2f10;
+    --color-warning-text: #ffd36b;
+
+    --lab-variable: #4fb3ec;
+    --lab-value: #ffcf3f;
+    --lab-collection: #3fd0d0;
+    --lab-function: #9a80ff;
+    --lab-decision: #ff9f4d;
+    --lab-loop: #3fe0b0;
+    --lab-return: #ff7a9a;
+
+    --evidence-verified: #4cd39b;
+    --evidence-static: #6aa8ff;
+    --evidence-inferred: #f0b44c;
+    --evidence-simulated: #b39dff;
+    --evidence-unsupported: #9c98b5;
+
+    --cat-python: #6aa3db;
+    --cat-notebook: #ff9a4d;
+    --cat-image: #ec6fb8;
+    --cat-data: #3fc9b8;
+    --cat-config: #e6b440;
+    --cat-doc: #a8a4c6;
+    --cat-web: #ff7d6e;
+    --cat-deps: #b195ff;
+    --cat-other: #7b7798;
+
+    --code-bg: #15141f;
+    --code-gutter-bg: #181724;
+    --code-gutter-text: #57536f;
+    --code-active-line: #1f1d2e;
+    --code-selection: #3d3470;
+    --code-highlight-line: #3a3014;
+    --code-highlight-edge: #ffcf3f;
+    --code-highlight-mark: #6b5514;
+
+    --syn-keyword: #d19bff;
+    --syn-def: #7cb6ff;
+    --syn-string: #7ee0a8;
+    --syn-number: #ffab70;
+    --syn-comment: #6f6b8c;
+    --syn-builtin: #5fd4e8;
+    --syn-operator: #a8a4c6;
+    --syn-decorator: #ffb36b;
+    --syn-property: #d6d2f0;
+    --syn-invalid: #ff7a9a;
+
+    --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.4);
+    --shadow-md: 0 4px 16px rgb(0 0 0 / 0.35), 0 1px 3px rgb(0 0 0 / 0.3);
+    --shadow-lg: 0 16px 40px rgb(0 0 0 / 0.5);
+    color-scheme: dark;
+  }
+}
+
+:root[data-theme='dark'] {
+  --color-bg: #11101a;
+  --color-surface: #1a1925;
+  --color-surface-2: #222031;
+  --color-surface-3: #2c2a3f;
+  --color-border: #2e2c42;
+  --color-border-strong: #45425f;
+  --color-text: #ece9ff;
+  --color-text-muted: #a8a4c6;
+  --color-text-faint: #7b7798;
+  --color-accent: #9a80ff;
+  --color-accent-soft: #2e2752;
+  --color-accent-contrast: #12101c;
+  --color-focus: #a891ff;
+  --color-danger: #ff7a9a;
+  --color-warning-bg: #3a2f10;
+  --color-warning-text: #ffd36b;
+
+  --lab-variable: #4fb3ec;
+  --lab-value: #ffcf3f;
+  --lab-collection: #3fd0d0;
+  --lab-function: #9a80ff;
+  --lab-decision: #ff9f4d;
+  --lab-loop: #3fe0b0;
+  --lab-return: #ff7a9a;
+
+  --evidence-verified: #4cd39b;
+  --evidence-static: #6aa8ff;
+  --evidence-inferred: #f0b44c;
+  --evidence-simulated: #b39dff;
+  --evidence-unsupported: #9c98b5;
+
+  --cat-python: #6aa3db;
+  --cat-notebook: #ff9a4d;
+  --cat-image: #ec6fb8;
+  --cat-data: #3fc9b8;
+  --cat-config: #e6b440;
+  --cat-doc: #a8a4c6;
+  --cat-web: #ff7d6e;
+  --cat-deps: #b195ff;
+  --cat-other: #7b7798;
+
+  --code-bg: #15141f;
+  --code-gutter-bg: #181724;
+  --code-gutter-text: #57536f;
+  --code-active-line: #1f1d2e;
+  --code-selection: #3d3470;
+  --code-highlight-line: #3a3014;
+  --code-highlight-edge: #ffcf3f;
+  --code-highlight-mark: #6b5514;
+
+  --syn-keyword: #d19bff;
+  --syn-def: #7cb6ff;
+  --syn-string: #7ee0a8;
+  --syn-number: #ffab70;
+  --syn-comment: #6f6b8c;
+  --syn-builtin: #5fd4e8;
+  --syn-operator: #a8a4c6;
+  --syn-decorator: #ffb36b;
+  --syn-property: #d6d2f0;
+  --syn-invalid: #ff7a9a;
+
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.4);
+  --shadow-md: 0 4px 16px rgb(0 0 0 / 0.35), 0 1px 3px rgb(0 0 0 / 0.3);
+  --shadow-lg: 0 16px 40px rgb(0 0 0 / 0.5);
+  color-scheme: dark;
+}
+
+/* ---- Reduced motion: keep state changes, drop movement ----------------- */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-fast: 0ms;
+    --motion-normal: 0ms;
+    --motion-slow: 0ms;
+  }
+}

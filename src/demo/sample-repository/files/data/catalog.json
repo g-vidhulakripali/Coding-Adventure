@@ -1,0 +1,8 @@
+{
+  "items": [
+    { "sku": "A-100", "name": "Notebook", "price": 12.0 },
+    { "sku": "B-200", "name": "Pencil set", "price": 8.0 },
+    { "sku": "C-300", "name": "Eraser", "price": 5.0 }
+  ],
+  "currency": "EUR"
+}

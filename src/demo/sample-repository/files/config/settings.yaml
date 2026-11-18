@@ -1,0 +1,11 @@
+shop:
+  name: Corner Shop
+  currency: EUR
+  default_discount: 0.10
+
+usage:
+  source: data/usage.csv
+  stations:
+    - north
+    - south
+    - east
