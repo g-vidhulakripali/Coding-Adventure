@@ -281,3 +281,14 @@
   stroke-linecap: round;
   stroke-linejoin: round;
 }
+
+.lab__dock-open {
+  margin-left: 4px;
+  color: var(--evidence-inferred);
+}
+
+.lab__assumed {
+  border: 1px dashed var(--evidence-inferred);
+  color: var(--evidence-inferred);
+  white-space: nowrap;
+}

@@ -11,7 +11,11 @@ import type { FunctionDef } from '../parser/python/ast';
 
 export type DType = 'float64' | 'int64' | 'bool' | 'object';
 
+/** Variable scopes a nested function or lambda can see, innermost first. */
+export type Closure = ReadonlyArray<Map<string, { value: PyValue; setAt: number | null }>>;
+
 export interface FunctionValue {
+  readonly closure?: Closure;
   readonly def: FunctionDef;
   /** File that defines the function; also its global namespace. */
   readonly path: string;
@@ -24,9 +28,16 @@ export type PyValue =
   | { readonly t: 'int'; readonly v: number }
   | { readonly t: 'float'; readonly v: number }
   | { readonly t: 'str'; readonly v: string }
-  | { readonly t: 'list'; readonly items: readonly PyValue[] }
+  /** `ref` identifies a mutable container, so every name holding it sees the same changes. */
+  | { readonly t: 'list'; readonly items: readonly PyValue[]; readonly ref?: number }
+  | { readonly t: 'set'; readonly items: readonly PyValue[]; readonly ref?: number }
+  /** A value the simulation cannot compute. Shown as `?`, never guessed. `from` is the code or library name it comes from. */
+  | { readonly t: 'unknown'; readonly from: string }
+  | { readonly t: 'exc-type'; readonly name: string }
+  | { readonly t: 'exception'; readonly name: string; readonly message: string }
+  | { readonly t: 'ellipsis' }
   | { readonly t: 'tuple'; readonly items: readonly PyValue[] }
-  | { readonly t: 'dict'; readonly entries: ReadonlyArray<readonly [PyValue, PyValue]> }
+  | { readonly t: 'dict'; readonly entries: ReadonlyArray<readonly [PyValue, PyValue]>; readonly ref?: number }
   | { readonly t: 'range'; readonly start: number; readonly stop: number; readonly step: number }
   | { readonly t: 'function'; readonly fn: FunctionValue }
   | { readonly t: 'builtin'; readonly name: string }
@@ -34,7 +45,7 @@ export type PyValue =
   | { readonly t: 'module'; readonly name: string; readonly origin: 'project' | 'library'; readonly modelled: boolean; readonly path?: string }
   | { readonly t: 'np-scalar'; readonly dtype: 'float64' | 'int64' | 'bool'; readonly v: number }
   | { readonly t: 'ndarray'; readonly dtype: DType; readonly items: readonly PyValue[] }
-  | { readonly t: 'series'; readonly dtype: DType; readonly items: readonly PyValue[]; readonly name?: string }
+  | { readonly t: 'series'; readonly dtype: DType; readonly items: readonly PyValue[]; readonly name?: string; /** Row labels when they differ from 0…n-1. */ readonly index?: readonly number[] }
   | { readonly t: 'iloc'; readonly series: Extract<PyValue, { t: 'series' }> }
   | { readonly t: 'method'; readonly self: PyValue; readonly name: string; readonly owner: string }
   /**
@@ -45,9 +56,11 @@ export type PyValue =
   /** A project method bound to its object (`obj.load`), ready to be called. */
   | { readonly t: 'bound'; readonly self: PyValue; readonly fn: FunctionValue; readonly cls: string }
   /** A pandas DataFrame: named columns of equal length (default RangeIndex). */
-  | { readonly t: 'dataframe'; readonly columns: ReadonlyArray<{ readonly name: string; readonly dtype: DType; readonly items: readonly PyValue[] }> };
+  | { readonly t: 'dataframe'; readonly columns: ReadonlyArray<{ readonly name: string; readonly dtype: DType; readonly items: readonly PyValue[] }>; readonly ref?: number; readonly index?: readonly number[] };
 
 export const NONE: PyValue = { t: 'none' };
+export const unknown = (from: string): PyValue => ({ t: 'unknown', from });
+export const isUnknown = (v: PyValue): boolean => v.t === 'unknown';
 export const pyInt = (v: number): PyValue => ({ t: 'int', v });
 export const pyFloat = (v: number): PyValue => ({ t: 'float', v });
 export const pyStr = (v: string): PyValue => ({ t: 'str', v });
@@ -58,6 +71,12 @@ export function typeName(value: PyValue): string {
   switch (value.t) {
     case 'none':
       return 'NoneType';
+    case 'unknown':
+      return 'not computed';
+    case 'exc-type':
+      return 'type';
+    case 'exception':
+      return value.name;
     case 'np-scalar':
       return `numpy.${value.dtype === 'bool' ? 'bool' : value.dtype}`;
     case 'ndarray':
@@ -92,6 +111,22 @@ export function typeLabel(value: PyValue): string {
 
 export function isCollection(value: PyValue): value is Extract<PyValue, { t: 'list' | 'tuple' | 'ndarray' | 'series' }> {
   return value.t === 'list' || value.t === 'tuple' || value.t === 'ndarray' || value.t === 'series';
+}
+
+/** True when the value is, or directly contains, something that could not be computed. */
+export function hasUnknown(value: PyValue, depth = 3): boolean {
+  if (value.t === 'unknown') return true;
+  if (depth === 0) return false;
+  switch (value.t) {
+    case 'list':
+    case 'tuple':
+    case 'set':
+      return value.items.some((v) => hasUnknown(v, depth - 1));
+    case 'dict':
+      return value.entries.some(([k, v]) => hasUnknown(k, depth - 1) || hasUnknown(v, depth - 1));
+    default:
+      return false;
+  }
 }
 
 /** Numeric view for int/float/bool/np-scalar; null otherwise. */
@@ -162,6 +197,16 @@ export function pyRepr(value: PyValue): string {
       return floatRepr(value.v);
     case 'str':
       return strRepr(value.v);
+    case 'unknown':
+      return '?';
+    case 'set':
+      return value.items.length === 0 ? 'set()' : `{${value.items.map(pyRepr).join(', ')}}`;
+    case 'exc-type':
+      return `<class '${value.name}'>`;
+    case 'exception':
+      return `${value.name}(${value.message ? strRepr(value.message) : ''})`;
+    case 'ellipsis':
+      return 'Ellipsis';
     case 'list':
       return `[${value.items.map(pyRepr).join(', ')}]`;
     case 'tuple':
@@ -232,13 +277,15 @@ export function pyStrOf(value: PyValue): string {
   switch (value.t) {
     case 'str':
       return value.v;
+    case 'exception':
+      return value.message;
     case 'np-scalar':
       return npScalarStr(value);
     case 'ndarray':
       return `[${value.items.map(elementStr).join(' ')}]`;
     case 'series': {
       const width = Math.max(...value.items.map((v) => elementStr(v).length), 1);
-      const lines = value.items.map((v, i) => `${String(i).padEnd(4)}${elementStr(v).padStart(width)}`);
+      const lines = value.items.map((v, i) => `${String(value.index?.[i] ?? i).padEnd(4)}${elementStr(v).padStart(width)}`);
       return [...lines, `${value.name !== undefined ? `Name: ${value.name}, ` : ''}dtype: ${value.dtype}`].join('\n');
     }
     case 'dataframe': {
@@ -248,7 +295,7 @@ export function pyStrOf(value: PyValue): string {
       const cells = value.columns.map((c) => [c.name, ...c.items.map(cell)]);
       const widths = cells.map((col) => Math.max(...col.map((x) => x.length)));
       const idxWidth = String(Math.max(0, n - 1)).length;
-      const line = (r: number) => `${(r === 0 ? '' : String(r - 1)).padEnd(idxWidth)} ${cells.map((col, i) => col[r]!.padStart(widths[i]!)).join('  ')}`;
+      const line = (r: number) => `${(r === 0 ? '' : String(value.index?.[r - 1] ?? r - 1)).padEnd(idxWidth)} ${cells.map((col, i) => col[r]!.padStart(widths[i]!)).join('  ')}`;
       return Array.from({ length: n + 1 }, (_, r) => line(r)).join('\n');
     }
     default:

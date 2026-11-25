@@ -20,7 +20,8 @@ import type { ViewerHighlight } from '../../components/code-editor/codemirrorSet
 import { extractPythonOutline, type FileOutline, type OutlineSymbol } from '../../core/parser/outline';
 import { defaultFileFor, loadProject } from '../../core/project/registry';
 import { isTextCategory } from '../../core/repository/fileTypes';
-import type { ProjectSource } from '../../core/repository/types';
+import { ANALYSIS_LIMITS } from '../../core/import/limits';
+import type { ProjectSource, RepositoryFile } from '../../core/repository/types';
 import type { LineRange } from '../../core/source-mapping/types';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
 import { usePreference } from '../../hooks/usePreference';
@@ -107,7 +108,7 @@ export function WorkspaceRoute({ projectId, filePath, lines, theme, onThemeChang
       : { status: 'loading' };
 
   const outline: FileOutline | null = useMemo(
-    () => (file?.category === 'python' && content.status === 'ready' ? extractPythonOutline(content.text) : null),
+    () => (file?.category === 'python' && content.status === 'ready' ? extractPythonOutline(normaliseNewlines(content.text)) : null),
     [file, content],
   );
   const lineCount = content.status === 'ready' ? countLines(content.text) : null;
@@ -116,24 +117,45 @@ export function WorkspaceRoute({ projectId, filePath, lines, theme, onThemeChang
   const [sources, setSources] = useState<Map<string, string> | null>(null);
   // CSV files the code may read with pd.read_csv (data only; nothing is executed).
   const [dataFiles, setDataFiles] = useState<Map<string, string> | null>(null);
+  const [notAnalysed, setNotAnalysed] = useState<readonly string[]>([]);
   useEffect(() => {
     if (!project) return;
     let cancelled = false;
-    const read = (category: string) =>
-      Promise.all(project.files.filter((f) => f.category === category).map((f) => project.readText(f.path).then((text) => [f.path, text] as const)));
-    Promise.all([read('python'), read('csv')]).then(
-      ([py, csv]) => {
-        if (cancelled) return;
-        setSources(new Map(py));
-        setDataFiles(new Map(csv));
-      },
-      () => !cancelled && setSources(new Map()),
-    );
+    const left: string[] = [];
+    const read = async (wanted: (f: RepositoryFile) => boolean, fileLimit: number, totalLimit: number) => {
+      const out = new Map<string, string>();
+      let total = 0;
+      for (const f of project.files) {
+        if (!wanted(f)) continue;
+        if (cancelled) break;
+        if (f.size > fileLimit || total + f.size > totalLimit) {
+          left.push(f.path);
+          continue;
+        }
+        total += f.size;
+        // The analysis copy has uniform line endings; the original file stays as it is.
+        // A file that cannot be read as text is left out of the analysis, not the project.
+        await project.readText(f.path).then(
+          (text) => out.set(f.path, normaliseNewlines(text)),
+          () => left.push(f.path),
+        );
+      }
+      return out;
+    };
+    void (async () => {
+      const py = await read((f) => f.category === 'python' || f.name === 'setup.py', ANALYSIS_LIMITS.pythonFileBytes, ANALYSIS_LIMITS.pythonTotalBytes);
+      const csv = await read((f) => f.category === 'csv', ANALYSIS_LIMITS.csvFileBytes, ANALYSIS_LIMITS.csvTotalBytes);
+      if (cancelled) return;
+      setDataFiles(csv);
+      setSources(py);
+      setNotAnalysed(left);
+    })();
     return () => {
       cancelled = true;
     };
   }, [project]);
   const sim = useSimulationController(sources, dataFiles, filePath);
+  const { touches: simTouches, selectScenarioFor, selectScenarioAt } = sim;
 
   // ---- Navigation helpers ------------------------------------------------
   const go = useCallback(
@@ -144,16 +166,20 @@ export function WorkspaceRoute({ projectId, filePath, lines, theme, onThemeChang
   const selectFile = useCallback(
     (path: string) => {
       go(path, null);
+      // Opening a file that the current run does not touch shows that file in the Lab instead.
+      if (!simTouches(path)) selectScenarioFor(path);
       if (compact) setCompactPanel('code');
     },
-    [go, compact],
+    [go, compact, simTouches, selectScenarioFor],
   );
   const selectSymbol = useCallback(
     (symbol: OutlineSymbol) => {
       go(filePath, symbol.range);
+      // A function chosen in the outline is the one shown in the Lab.
+      if (filePath) selectScenarioAt(filePath, symbol.line);
       if (compact) setCompactPanel('code');
     },
-    [go, filePath, compact],
+    [go, filePath, compact, selectScenarioAt],
   );
   const selectLine = useCallback((line: number) => go(filePath, { startLine: line, endLine: line }, true), [go, filePath]);
   // ---- Source highlight: user selection (route) or the simulation step ----
@@ -207,7 +233,11 @@ export function WorkspaceRoute({ projectId, filePath, lines, theme, onThemeChang
               <span className="chip" title="Bundled demonstration project — not an uploaded repository">
                 demo
               </span>
-            ) : null}
+            ) : (
+              <span className="chip" title="Saved in this browser only">
+                {project.files.length} files
+              </span>
+            )}
           </span>
         ) : null
       }
@@ -268,6 +298,8 @@ export function WorkspaceRoute({ projectId, filePath, lines, theme, onThemeChang
       outline={outline ? outline.symbols : null}
       activeLines={lines}
       onSelectSymbol={selectSymbol}
+      leftOut={project.leftOut ?? null}
+      notAnalysed={notAnalysed}
     />
   );
   const code = <CodePanel file={file} content={content} highlight={codeHighlight} onLineClick={selectLine} onClearHighlight={clearHighlight} />;
@@ -335,6 +367,10 @@ export function WorkspaceRoute({ projectId, filePath, lines, theme, onThemeChang
       </main>
     </div>
   );
+}
+
+function normaliseNewlines(text: string): string {
+  return text.replace(/^\ufeff/, '').replace(/\r\n?/g, '\n');
 }
 
 function countLines(text: string): number {

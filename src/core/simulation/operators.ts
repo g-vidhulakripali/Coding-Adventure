@@ -80,6 +80,10 @@ function elementwise(op: string, a: PyValue, b: PyValue): PyValue | null {
   if (left && right && left.length !== right.length) {
     throw new PyError('ValueError', `operands could not be broadcast together with shapes (${left.length},) (${right.length},)`);
   }
+  if (a.t === 'series' && b.t === 'series') {
+    const label = (s: typeof a, i: number) => s.index?.[i] ?? i;
+    if (a.items.some((_, i) => label(a, i) !== label(b, i))) throw new UnsupportedError('Arithmetic between Series with different row labels is not modelled.');
+  }
   const n = (left ?? right)!.length;
   const items: PyValue[] = [];
   for (let i = 0; i < n; i++) {
@@ -90,7 +94,11 @@ function elementwise(op: string, a: PyValue, b: PyValue): PyValue | null {
     items.push(r);
   }
   const dtype: DType = items.some((v) => v.t === 'np-scalar' && v.dtype === 'float64') ? 'float64' : 'int64';
-  return container.t === 'series' ? { t: 'series', dtype, items } : { t: 'ndarray', dtype, items };
+  const series = a.t === 'series' ? a : b.t === 'series' ? b : null;
+  if (!series) return { t: 'ndarray', dtype, items };
+  // pandas keeps the name only when both sides agree on it.
+  const keepName = a.t === 'series' && b.t === 'series' ? a.name === b.name : true;
+  return { t: 'series', dtype, items, ...(keepName && series.name !== undefined ? { name: series.name } : {}), ...(series.index ? { index: series.index } : {}) };
 }
 
 function toNp(v: PyValue): PyValue {
@@ -112,6 +120,24 @@ export function binaryOp(op: string, a: PyValue, b: PyValue): PyValue {
     if (a.t === 'str') throw new PyError('TypeError', `can only concatenate str (not "${typeName(b)}") to str`);
     if (a.t === 'list') throw new PyError('TypeError', `can only concatenate list (not "${typeName(b)}") to list`);
   }
+  if (a.t === 'set' && b.t === 'set' && ['|', '&', '-', '^'].includes(op)) {
+    const inA = a.items;
+    const inB = b.items;
+    const has = (list: readonly PyValue[], v: PyValue) => list.some((o) => pyEquals(o, v));
+    const only = inB.filter((v) => !has(inA, v));
+    return { t: 'set', items: op === '|' ? [...inA, ...only] : op === '&' ? inA.filter((v) => has(inB, v)) : op === '-' ? inA.filter((v) => !has(inB, v)) : [...inA.filter((v) => !has(inB, v)), ...only] };
+  }
+  if (a.t === 'dict' && b.t === 'dict' && op === '|') {
+    const entries = a.entries.map(([k, v]) => [k, b.entries.find(([k2]) => pyEquals(k2, k))?.[1] ?? v] as const);
+    return { t: 'dict', entries: [...entries, ...b.entries.filter(([k]) => !a.entries.some(([k2]) => pyEquals(k2, k)))] };
+  }
+  if (['&', '|', '^', '<<', '>>'].includes(op) && (a.t === 'int' || a.t === 'bool') && (b.t === 'int' || b.t === 'bool')) {
+    const x = numericOf(a)!;
+    const y = numericOf(b)!;
+    if (Math.abs(x) > 0x7fffffff || Math.abs(y) > 0x7fffffff || (op === '<<' && y > 20)) throw new UnsupportedError(`\`${op}\` on numbers this large is not modelled.`);
+    const r = op === '&' ? x & y : op === '|' ? x | y : op === '^' ? x ^ y : op === '<<' ? x * 2 ** y : x >> y;
+    return a.t === 'bool' && b.t === 'bool' && op !== '<<' && op !== '>>' ? { t: 'bool', v: r !== 0 } : { t: 'int', v: r };
+  }
   if (op === '*') {
     const repeat = (seq: PyValue, n: PyValue): PyValue | null => {
       if (n.t !== 'int') return null;
@@ -127,6 +153,7 @@ export function binaryOp(op: string, a: PyValue, b: PyValue): PyValue {
     const r = repeat(a, b) ?? repeat(b, a);
     if (r) return r;
   }
+  if (a.t === 'str' && op === '%') throw new UnsupportedError('Text formatting with % is not modelled.');
   if (['+', '-', '*', '/', '//', '%', '**'].includes(op)) {
     throw new PyError('TypeError', `unsupported operand type(s) for ${op}: '${typeName(a)}' and '${typeName(b)}'`);
   }
@@ -164,6 +191,7 @@ export function truthy(v: PyValue): boolean {
       return v.v.length > 0;
     case 'list':
     case 'tuple':
+    case 'set':
       return v.items.length > 0;
     case 'dict':
       return v.entries.length > 0;
@@ -207,6 +235,10 @@ export function pyEquals(a: PyValue, b: PyValue): boolean {
     }
     case 'instance':
       return a.id === (b as typeof a).id;
+    case 'set': {
+      const other = b as typeof a;
+      return a.items.length === other.items.length && a.items.every((v) => other.items.some((o) => pyEquals(v, o)));
+    }
     default:
       return a === b;
   }
@@ -236,6 +268,12 @@ function order(op: string, a: PyValue, b: PyValue): boolean {
 
 function contains(container: PyValue, item: PyValue): boolean {
   switch (container.t) {
+    case 'set':
+      return container.items.some((v) => pyEquals(v, item));
+    case 'series':
+      throw new UnsupportedError('`in` on a Series checks row labels, which is not modelled.');
+    case 'dataframe':
+      return item.t === 'str' && container.columns.some((c) => c.name === item.v);
     case 'str':
       if (item.t !== 'str') throw new PyError('TypeError', `'in <string>' requires string as left operand, not ${typeName(item)}`);
       return container.v.includes(item.v);
@@ -292,6 +330,7 @@ export function iterate(value: PyValue, cap: number): PyValue[] {
     case 'tuple':
     case 'ndarray':
     case 'series':
+    case 'set':
       return [...value.items];
     case 'str':
       return [...value.v].map((ch) => ({ t: 'str', v: ch }));

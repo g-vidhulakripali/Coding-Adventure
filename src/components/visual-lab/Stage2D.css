@@ -429,3 +429,45 @@
   box-shadow: inset 3px 0 0 var(--code-highlight-edge);
   background: color-mix(in srgb, var(--code-highlight-line) 70%, var(--color-surface));
 }
+
+.lines2d__chip.is-unknown {
+  border-style: dashed;
+  border-color: var(--evidence-inferred);
+  background: color-mix(in srgb, var(--evidence-inferred) 14%, var(--color-surface));
+}
+
+.ln--with,
+.ln--try,
+.ln--except,
+.ln--finally {
+  border-color: color-mix(in srgb, var(--lab-variable) 55%, transparent);
+  background: color-mix(in srgb, var(--lab-variable) 4%, transparent);
+}
+
+.ln--except {
+  border-color: color-mix(in srgb, var(--lab-return) 60%, transparent);
+  border-style: dashed;
+}
+
+.lines2d__choose {
+  display: inline-flex;
+  gap: 6px;
+  padding: 4px 0 2px;
+}
+
+.lines2d__choose button {
+  min-width: 48px;
+  padding: 2px 12px;
+  border: 1.5px dashed var(--evidence-inferred);
+  border-radius: var(--radius-pill);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-family: var(--font-mono);
+  cursor: pointer;
+}
+
+.lines2d__choose button[aria-pressed='true'] {
+  border-style: solid;
+  background: color-mix(in srgb, var(--evidence-inferred) 30%, var(--color-surface));
+  font-weight: 700;
+}

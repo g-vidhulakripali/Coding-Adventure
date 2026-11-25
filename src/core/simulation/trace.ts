@@ -21,6 +21,8 @@ export type StepKind =
   | 'decision'
   | 'loop'
   | 'error'
+  /** Something the simulation cannot compute; the result is `?` and the run continues. */
+  | 'unknown'
   | 'unsupported';
 
 /** Which visual metaphor represents the step (see the visual vocabulary). */
@@ -86,7 +88,9 @@ export interface Step {
   readonly notes: readonly string[];
   /** First later step that consumes this step's output. Filled after the run. */
   usedBy: number | null;
-  readonly evidence: 'simulated' | 'unsupported';
+  readonly evidence: 'simulated' | 'inferred' | 'unsupported';
+  /** Set when a decision depended on `?`: which way the run went, and the key to flip it. */
+  readonly assumption: { readonly key: string; readonly taken: boolean } | null;
 }
 
 export interface Trace {

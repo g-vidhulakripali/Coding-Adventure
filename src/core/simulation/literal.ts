@@ -1,10 +1,10 @@
-import type { PyValue } from './values';
+import { unknown, type PyValue } from './values';
 
 /**
  * Parses a Python literal typed by the user into an input value.
  *
- * Accepts numbers, strings, True/False/None and (nested) lists/tuples of those
- * — the same shapes `ast.literal_eval` accepts for these types. Nothing is
+ * Accepts numbers, strings, True/False/None and (nested) lists/tuples/dicts of
+ * those, plus `?` for a value that is left unknown — otherwise the same shapes `ast.literal_eval` accepts for these types. Nothing is
  * evaluated: this is a small recursive-descent parser.
  */
 export function parseLiteral(input: string): { ok: true; value: PyValue } | { ok: false; error: string } {
@@ -36,6 +36,11 @@ class LiteralParser {
     const ch = this.s[this.pos];
     if (ch === undefined) throw new Error('Expected a value');
     if (ch === '[') return { t: 'list', items: this.sequence(']') };
+    if (ch === '?') {
+      this.pos++;
+      return unknown('not given');
+    }
+    if (ch === '{') return this.dict();
     if (ch === '(') {
       const items = this.sequence(')');
       return { t: 'tuple', items };
@@ -80,6 +85,27 @@ class LiteralParser {
         return items;
       }
       throw new Error(`Expected "," or "${close}"`);
+    }
+  }
+
+  private dict(): PyValue {
+    this.pos++;
+    const entries: Array<readonly [PyValue, PyValue]> = [];
+    for (;;) {
+      this.skipSpace();
+      if (this.s[this.pos] === '}') {
+        this.pos++;
+        return { t: 'dict', entries };
+      }
+      const key = this.value();
+      if (key.t === 'list' || key.t === 'dict' || key.t === 'unknown') throw new Error('This cannot be a dictionary key');
+      this.skipSpace();
+      if (this.s[this.pos] !== ':') throw new Error('Expected ":"');
+      this.pos++;
+      entries.push([key, this.value()]);
+      this.skipSpace();
+      if (this.s[this.pos] === ',') this.pos++;
+      else if (this.s[this.pos] !== '}') throw new Error('Expected "," or "}"');
     }
   }
 

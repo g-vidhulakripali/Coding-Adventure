@@ -1,4 +1,6 @@
-import { Icon, type IconName } from '../../components/common/Icon';
+import { Icon } from '../../components/common/Icon';
+import { ImportCard } from '../../components/import/ImportCard';
+import { SavedProjects } from '../../components/import/SavedProjects';
 import { AppHeader } from '../../components/layout/AppHeader';
 import type { ThemePreference } from '../../hooks/useTheme';
 import { SAMPLE_PROJECT_ID } from '../../demo/constants';
@@ -21,45 +23,7 @@ const HERO_LINES: ReadonlyArray<ReadonlyArray<[string, string]>> = [
   [['i', '        '], ['f', 'verify'], ['p', '('], ['v', 'step'], ['p', '.'], ['v', 'source'], ['p', ')'], ['c', '      # exact line, always']],
 ];
 
-interface StartOption {
-  readonly file: string;
-  readonly icon: IconName;
-  readonly colorVar: string;
-  readonly title: string;
-  readonly comment: string;
-  readonly action?: { label: string; onClick: () => void };
-  readonly status?: string;
-}
-
-const OPTIONS: readonly StartOption[] = [
-  {
-    file: 'sample_project.py',
-    icon: 'play',
-    colorVar: '--lab-loop',
-    title: 'Explore the sample project',
-    comment: 'A small Python repo: a discounted shopping total across two files, and a pandas indexing expression.',
-    action: {
-      label: 'open sample',
-      onClick: () => navigate({ name: 'workspace', projectId: SAMPLE_PROJECT_ID, file: null, lines: null }),
-    },
-  },
-  {
-    file: 'import_zip.py',
-    icon: 'upload',
-    colorVar: '--lab-variable',
-    title: 'Import a ZIP repository',
-    comment: 'Secure, progressive import of your own repository, processed locally.',
-    status: 'TODO: phase 4',
-  },
-  {
-    file: 'saved_projects.db',
-    icon: 'library',
-    colorVar: '--lab-function',
-    title: 'Saved projects',
-    comment: 'Prepared projects are saved in this browser, so you can reopen them without re-importing.',
-    status: 'TODO: phase 6',
-  },
-];
+const openProject = (projectId: string) => navigate({ name: 'workspace', projectId, file: null, lines: null });
 
 export function HomeRoute({ theme, onThemeChange }: HomeRouteProps) {
   return (
@@ -115,30 +79,25 @@ export function HomeRoute({ theme, onThemeChange }: HomeRouteProps) {
         </section>
 
         <section className="home__actions" aria-label="Get started">
-          {OPTIONS.map((option) => (
-            <article key={option.file} className={option.action ? 'file-card file-card--active' : 'file-card'} aria-disabled={option.action ? undefined : true}>
-              <div className="file-card__tab">
-                <span style={{ color: `var(${option.colorVar})` }}>
-                  <Icon name={option.icon} />
-                </span>
-                {option.file}
-              </div>
-              <div className="file-card__body">
-                <h2>{option.title}</h2>
-                <p>
-                  <span className="tok tok--c"># </span>
-                  {option.comment}
-                </p>
-                {option.action ? (
-                  <button type="button" className="btn btn--primary" onClick={option.action.onClick}>
-                    <span aria-hidden="true">&gt;</span> {option.action.label}
-                  </button>
-                ) : (
-                  <span className="chip">{option.status}</span>
-                )}
-              </div>
-            </article>
-          ))}
+          <ImportCard onImported={openProject} />
+          <SavedProjects onOpen={openProject} />
+          <article className="file-card file-card--active">
+            <div className="file-card__tab">
+              <span style={{ color: 'var(--lab-loop)' }}>
+                <Icon name="play" />
+              </span>
+              sample_project.py
+            </div>
+            <div className="file-card__body">
+              <h2>Explore the sample project</h2>
+              <p>
+                <span className="tok tok--c"># </span>A small Python repo: a discounted shopping total across two files, and a pandas indexing expression.
+              </p>
+              <button type="button" className="btn btn--primary" onClick={() => openProject(SAMPLE_PROJECT_ID)}>
+                <span aria-hidden="true">&gt;</span> open sample
+              </button>
+            </div>
+          </article>
         </section>
       </main>
     </div>

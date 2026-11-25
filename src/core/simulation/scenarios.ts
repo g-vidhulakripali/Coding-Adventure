@@ -1,4 +1,4 @@
-import { computeLineStarts, positionAt, type Expr, type Module, type Stmt } from '../parser/python/ast';
+import { computeLineStarts, positionAt, type Expr, type FunctionDef, type Module, type Param, type Stmt } from '../parser/python/ast';
 import type { SourceSpan } from '../source-mapping/types';
 import { overrideKey } from './interpreter';
 import type { PyValue } from './values';
@@ -9,7 +9,14 @@ import type { PyValue } from './values';
  */
 
 export type ScenarioOption =
-  | { readonly id: string; readonly kind: 'script'; readonly path: string; readonly label: string }
+  | {
+      readonly id: string;
+      readonly kind: 'script';
+      readonly path: string;
+      readonly label: string;
+      /** The file does something when run (not only definitions and constants). */
+      readonly isProgram: boolean;
+    }
   | {
       readonly id: string;
       readonly kind: 'method';
@@ -18,6 +25,8 @@ export type ScenarioOption =
       readonly method: string;
       readonly label: string;
       readonly isProperty: boolean;
+      /** Line of the `def`. */
+      readonly line: number;
       /** Values needed to make the object (`__init__` parameters, without `self`). */
       readonly initParams: ReadonlyArray<{ readonly name: string; readonly defaultValue: PyValue | null }>;
       /** The method's own parameters (without `self`). */
@@ -29,6 +38,8 @@ export type ScenarioOption =
       readonly path: string;
       readonly name: string;
       readonly label: string;
+      /** Line of the `def`. */
+      readonly line: number;
       readonly params: ReadonlyArray<{ readonly name: string; readonly defaultValue: PyValue | null }>;
     };
 
@@ -53,25 +64,44 @@ function isScriptStatement(s: Stmt): boolean {
   return true;
 }
 
+/** `*args` and `**kwargs` have no single value to type in; they stay unknown. */
+const named = (p: Param) => p.kind !== 'varargs' && p.kind !== 'varkw';
+
 export function findScenarios(path: string, module: Module): ScenarioOption[] {
   const out: ScenarioOption[] = [];
+  const lineStarts = computeLineStarts(module.source);
   if (module.body.some(isScriptStatement)) {
-    out.push({ id: `script:${path}`, kind: 'script', path, label: `Run ${path.split('/').pop()} as a script` });
+    out.push({
+      id: `script:${path}`,
+      kind: 'script',
+      path,
+      label: `Run ${path.split('/').pop()} as a script`,
+      isProgram: module.body.some((s) => (s.type === 'Expr' && !s.isDocstring) || s.type === 'If' || s.type === 'For' || s.type === 'While' || s.type === 'With'),
+    });
   }
   // Methods of classes: make an object with your values, then run one method on it.
   for (const c of module.body) {
     if (c.type !== 'ClassDef') continue;
     const init = c.body.find((m) => m.type === 'FunctionDef' && m.name === '__init__');
-    const initParams = init && init.type === 'FunctionDef' ? init.params.slice(1) : [];
-    if (initParams.some((p) => p.kind === 'varargs' || p.kind === 'varkw')) continue;
+    const isDataclass = c.decorators.some((d) => d.type === 'Name' && /^(dataclasses\.)?dataclass\b/.test(d.id));
+    const fields = isDataclass
+      ? c.body.flatMap((s) =>
+          s.type === 'Declare' && s.name
+            ? [{ name: s.name, defaultValue: null }]
+            : s.type === 'Assign' && s.targets[0]?.type === 'Name'
+              ? [{ name: s.targets[0].id, defaultValue: literalValue(s.value) }]
+              : [],
+        )
+      : [];
+    const initParams =
+      init && init.type === 'FunctionDef' ? init.params.slice(1).filter(named).map((p) => ({ name: p.name, defaultValue: p.defaultValue ? literalValue(p.defaultValue) : null })) : fields;
     for (const m of c.body) {
-      if (m.type !== 'FunctionDef' || m.isAsync || m.name.startsWith('_')) continue;
+      if (m.type !== 'FunctionDef' || m.isAsync || /^__\w+__$/.test(m.name)) continue;
       const decorators = m.decorators.map((d) => module.source.slice(d.span.from, d.span.to));
       const isProperty = decorators.length === 1 && decorators[0] === 'property';
       const isStatic = decorators.length === 1 && decorators[0] === 'staticmethod';
       if (decorators.length > 0 && !isProperty && !isStatic) continue;
-      const params = isStatic ? m.params : m.params.slice(1);
-      if (params.some((p) => p.kind === 'varargs' || p.kind === 'varkw')) continue;
+      const params = (isStatic ? m.params : m.params.slice(1)).filter(named);
       out.push({
         id: `method:${path}:${c.name}.${m.name}`,
         kind: 'method',
@@ -79,22 +109,23 @@ export function findScenarios(path: string, module: Module): ScenarioOption[] {
         className: c.name,
         method: m.name,
         isProperty,
+        line: positionAt(lineStarts, m.headerSpan.from).line,
         label: isProperty ? `Use ${c.name}: read .${m.name}` : `Use ${c.name}: ${m.name}(${params.map((p) => p.name).join(', ')})`,
-        initParams: initParams.map((p) => ({ name: p.name, defaultValue: p.defaultValue ? literalValue(p.defaultValue) : null })),
+        initParams,
         params: isProperty ? [] : params.map((p) => ({ name: p.name, defaultValue: p.defaultValue ? literalValue(p.defaultValue) : null })),
       });
     }
   }
   for (const s of module.body) {
-    if (s.type !== 'FunctionDef' || s.isAsync || s.decorators.length > 0) continue;
-    if (s.params.some((p) => p.kind === 'varargs' || p.kind === 'varkw')) continue;
+    if (s.type !== 'FunctionDef' || s.isAsync) continue;
     out.push({
       id: `function:${path}:${s.name}`,
       kind: 'function',
       path,
       name: s.name,
+      line: positionAt(lineStarts, s.headerSpan.from).line,
       label: `Call ${s.name}(${s.params.map((p) => p.name).join(', ')})`,
-      params: s.params.map((p) => ({ name: p.name, defaultValue: p.defaultValue ? literalValue(p.defaultValue) : null })),
+      params: s.params.filter(named).map((p) => ({ name: p.name, defaultValue: p.defaultValue ? literalValue(p.defaultValue) : null })),
     });
   }
   return out;
@@ -135,6 +166,15 @@ export function literalValue(e: Expr): PyValue | null {
     default:
       return null;
   }
+}
+
+/** The definition a function or method scenario runs (the `__init__` of its class with `init`). */
+export function definitionOf(scenario: ScenarioOption, module: Module, init = false): FunctionDef | null {
+  if (scenario.kind === 'script') return null;
+  if (scenario.kind === 'function') return module.body.find((s): s is FunctionDef => s.type === 'FunctionDef' && s.name === scenario.name) ?? null;
+  const cls = module.body.find((s) => s.type === 'ClassDef' && s.name === scenario.className);
+  const name = init ? '__init__' : scenario.method;
+  return cls?.type === 'ClassDef' ? (cls.body.find((m): m is FunctionDef => m.type === 'FunctionDef' && m.name === name) ?? null) : null;
 }
 
 /**

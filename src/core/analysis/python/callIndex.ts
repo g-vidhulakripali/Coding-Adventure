@@ -88,12 +88,22 @@ interface FileInfo {
 }
 
 export function buildCallIndex(sources: ReadonlyMap<string, string>): CallIndex {
+  const steps = callIndexSteps(sources);
+  for (;;) {
+    const r = steps.next();
+    if (r.done) return r.value;
+  }
+}
+
+/** Same as `buildCallIndex`, pausing after every file so a large project does not freeze the page. */
+export function* callIndexSteps(sources: ReadonlyMap<string, string>): Generator<void, CallIndex> {
   const definitions: Definition[] = [];
   const raw: RawCall[] = [];
   const files = new Map<string, FileInfo>();
   const filesWithSyntaxErrors: string[] = [];
 
   for (const [path, source] of sources) {
+    yield;
     const tree = pythonLanguage.parser.parse(source);
     const lineStarts = computeLineStarts(source);
     const text = (n: { from: number; to: number }) => source.slice(n.from, n.to);
@@ -208,6 +218,9 @@ function recordImport(node: SyntaxNode, info: FileInfo, text: (n: SyntaxNode) =>
       if (modulePath) {
         const sub = modulePath.endsWith('__init__.py') ? resolveModulePath(name, 1, modulePath, sources) : null;
         info.bindings.set(local, { kind: 'project-symbol', path: modulePath, symbol: name, submodule: sub });
+      } else if (resolveModulePath([moduleName, name].filter(Boolean).join('.'), level, path, sources)) {
+        // A package without `__init__.py`: the name is a file inside the folder.
+        info.bindings.set(local, { kind: 'project-module', path: resolveModulePath([moduleName, name].filter(Boolean).join('.'), level, path, sources)! });
       } else {
         info.bindings.set(local, { kind: 'library', module: `${'.'.repeat(level)}${moduleName}`, symbol: name });
       }
@@ -235,6 +248,8 @@ export function resolveModulePath(name: string | null, level: number, fromPath: 
   } else {
     // Script directory first (sys.path[0]), then the repository root.
     bases.push(dirname(fromPath), '');
+    // Projects nested in folders: try every parent folder of the importing file.
+    for (let dir = dirname(fromPath); dir; dir = dirname(dir)) bases.push(dir);
   }
   for (const base of [...new Set(bases)]) {
     const prefix = [base, ...parts].filter(Boolean).join('/');

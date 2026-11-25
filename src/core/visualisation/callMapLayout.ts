@@ -42,7 +42,32 @@ const COL_GAP = 90;
 const ROW_GAP = 22;
 const PAD = 24;
 
-export function layoutCallMap(index: CallIndex, options: { showExternal: boolean }): CallMapLayout {
+/** Above this many definitions the whole map is unreadable, so it starts focused on one function. */
+export const FOCUS_THRESHOLD = 60;
+const FOCUS_LIMIT = 70;
+
+/** A definition with its callers, what it calls, and what those call. */
+export function neighbourhood(index: CallIndex, focus: string): Set<string> {
+  const keep = new Set([focus]);
+  const add = (ids: Iterable<string>) => {
+    for (const id of ids) if (keep.size < FOCUS_LIMIT) keep.add(id);
+  };
+  const callees = (ids: ReadonlySet<string>) => index.calls.flatMap((c) => (ids.has(c.callerId) && c.target.kind === 'internal' ? [c.target.id] : []));
+  add(callees(new Set([focus])));
+  add(index.calls.flatMap((c) => (c.target.kind === 'internal' && c.target.id === focus ? [c.callerId] : [])));
+  const direct = new Set(callees(new Set([focus])));
+  add(callees(direct));
+  return keep;
+}
+
+export function layoutCallMap(full: CallIndex, options: { showExternal: boolean; focus?: string | null }): CallMapLayout {
+  const near = options.focus ? neighbourhood(full, options.focus) : null;
+  const index: Pick<CallIndex, 'definitions' | 'calls'> = near
+    ? {
+        definitions: full.definitions.filter((d) => near.has(d.id)),
+        calls: full.calls.filter((c) => near.has(c.callerId) && (c.target.kind === 'internal' ? near.has(c.target.id) : c.callerId === options.focus)),
+      }
+    : full;
   const defs = new Map(index.definitions.map((d) => [d.id, d]));
   const internalEdges = new Map<string, { from: string; to: string; sites: CallSite[]; evidence: 'static' | 'inferred' }>();
   const externalEdges = new Map<string, { from: string; to: string; sites: CallSite[]; evidence: 'external' | 'unresolved'; node: Omit<MapNode, 'x' | 'y'> }>();

@@ -179,18 +179,36 @@ describe('Example 2 — pandas / NumPy indexing expression', () => {
 });
 
 describe('honest limits', () => {
-  it('stops with an unsupported step instead of guessing', () => {
-    const t = simulate(program({ 'a.py': 'x = [1, 2]\ny = [i * 2 for i in x]\nprint(y)\n' }), { kind: 'script', path: 'a.py' });
-    expect(t.status).toBe('stopped');
-    expect(t.stop?.kind).toBe('unsupported');
+  it('shows `?` for unknown libraries and keeps going', () => {
+    const t = simulate(program({ 'a.py': 'import requests\nr = requests.get("x")\nn = 2 + 3\ntotal = r.count + n\n' }), { kind: 'script', path: 'a.py' });
+    expect(t.status).toBe('completed');
+    expect(t.steps.find((s) => s.kind === 'unknown')).toMatchObject({ code: 'requests.get("x")', evidence: 'unsupported' });
     const last = t.steps[t.steps.length - 1]!;
-    expect(last).toMatchObject({ kind: 'unsupported', evidence: 'unsupported', code: '[i * 2 for i in x]' });
+    expect(last.frames[0]!.vars.filter((x) => ['r', 'n', 'total'].includes(x.name)).map((x) => `${x.name}=${show(x.value)}`)).toEqual(['r=?', 'n=5', 'total=?']);
   });
 
-  it('does not model unknown libraries', () => {
-    const t = simulate(program({ 'a.py': 'import requests\nr = requests.get("x")\n' }), { kind: 'script', path: 'a.py' });
-    expect(t.stop?.kind).toBe('unsupported');
-    expect(t.stop?.message).toContain('not modelled');
+  it('assumes a direction for unknown conditions, marks it, and lets the user switch it', () => {
+    const files = { 'a.py': 'import requests\nif requests.ok():\n    x = 1\nelse:\n    x = 2\n' };
+    const t = simulate(program(files), { kind: 'script', path: 'a.py' });
+    const d = t.steps.find((s) => s.assumption)!;
+    expect(d).toMatchObject({ kind: 'decision', evidence: 'inferred', assumption: { taken: true } });
+    expect(t.assumptions.join(' ')).toContain('assumes yes');
+    const flipped = simulate(program(files), { kind: 'script', path: 'a.py' }, { choices: new Map([[d.assumption!.key, false]]) });
+    expect(show(flipped.steps[flipped.steps.length - 1]!.output)).toBe('2');
+  });
+
+  it('never keeps numbers that depend on an unknown number of repetitions', () => {
+    const src = 'import requests\ntotal = 0\nseen = []\nfor r in requests.get():\n    total += 1\n    seen.append(1)\nn = len(seen)\n';
+    const t = simulate(program({ 'a.py': src }), { kind: 'script', path: 'a.py' });
+    const vars = Object.fromEntries(t.steps[t.steps.length - 1]!.frames[0]!.vars.map((x) => [x.name, show(x.value)]));
+    expect(vars).toMatchObject({ total: '?', seen: '?', n: '?' });
+  });
+
+  it('runs a function without arguments: they stay `?`', () => {
+    const t = simulate(program({ 'a.py': 'def f(a, b=2):\n    c = b * 10\n    return a + c\n' }), { kind: 'function', path: 'a.py', name: 'f', args: new Map() });
+    expect(t.status).toBe('completed');
+    expect(t.steps.filter((s) => s.kind === 'assign').map((s) => show(s.output))).toEqual(['20']);
+    expect(show(t.steps.find((s) => s.kind === 'return')!.output)).toBe('?');
   });
 
   it('models Python errors with CPython wording', () => {

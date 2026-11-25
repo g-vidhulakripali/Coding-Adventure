@@ -56,7 +56,7 @@ function CodePanelBody({ file, content, highlight, onLineClick }: Omit<CodePanel
     return (
       <PanelMessage
         title={file.category === 'image' ? 'Image preview not available yet' : 'Unsupported file type'}
-        body={`${file.name} · ${info.label} · ${formatBytes(file.size)}. This file is kept unchanged in the project; previews for more file types arrive with ZIP import (Phase 4).`}
+        body={`${file.name} · ${info.label} · ${formatBytes(file.size)}. ${file.note ?? 'This file is kept unchanged in the project. A preview for this file type is not available yet.'}`}
       />
     );
   }

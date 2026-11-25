@@ -30,7 +30,7 @@ export interface Story {
   readonly tiles: readonly StoryTile[];
   /** Where the answer goes next, in plain words. */
   readonly next: string | null;
-  readonly tone: 'normal' | 'error' | 'stop';
+  readonly tone: 'normal' | 'error' | 'stop' | 'unknown';
 }
 
 const MAX_LIST = 8;
@@ -49,6 +49,16 @@ const BUILTIN_LABELS: Record<string, string> = {
   list: 'list',
   tuple: 'list',
   sorted: 'in order',
+  isinstance: 'what kind?',
+  any: 'any true?',
+  all: 'all true?',
+  enumerate: 'number them',
+  zip: 'pair up',
+  map: 'change each',
+  filter: 'keep some',
+  dict: 'new dictionary',
+  set: 'no doubles',
+  reversed: 'backwards',
 };
 
 const METHOD_LABELS: Record<string, string> = {
@@ -58,6 +68,27 @@ const METHOD_LABELS: Record<string, string> = {
   max: 'biggest',
   min: 'smallest',
   tolist: 'list',
+  append: 'add one',
+  extend: 'add several',
+  get: 'look up',
+  items: 'pairs',
+  keys: 'names',
+  values: 'values',
+  groupby: 'make groups',
+  merge: 'join tables',
+  sort_values: 'sort rows',
+  dropna: 'drop empty',
+  reset_index: 'number rows',
+  set_index: 'label rows',
+  copy: 'copy',
+  median: 'middle',
+  std: 'spread',
+  isin: 'in list?',
+  concat: 'stack tables',
+  ppf: 'cut-off',
+  cdf: 'share below',
+  diff: 'change',
+  cumsum: 'running total',
 };
 const short = (v: PyValue) => displayValue(v, 22);
 
@@ -66,6 +97,7 @@ function valueTile(v: PyValue, caption?: string, source?: string | null): StoryT
   const extra = { ...(caption ? { caption } : {}), ...(source ? { source } : {}) };
   if (v.t === 'dataframe') return { kind: 'table', ...tablePreview(v, 3), ...extra };
   if (v.t === 'instance') return { kind: 'object', cls: v.cls, fields: v.fields.map(([k, f]) => [k, displayValue(f, 16)] as const), ...extra };
+  if (v.t === 'dict') return { kind: 'object', cls: '', fields: v.entries.slice(0, 6).map(([k, x]) => [displayValue(k, 18), displayValue(x, 16)] as const), ...extra };
   if (items) return { kind: 'list', items: items.slice(0, MAX_LIST).map(elementDisplay), selected: null, ...extra };
   return { kind: 'value', text: short(v), ...extra };
 }
@@ -76,7 +108,7 @@ function inputTile(input: StepInput): StoryTile {
 }
 
 function resultTile(v: PyValue): StoryTile {
-  if (v.t === 'dataframe' || v.t === 'instance') return valueTile(v);
+  if (v.t === 'dataframe' || v.t === 'instance' || v.t === 'dict') return valueTile(v);
   const items = elementsOf(v);
   if (items) return { kind: 'list', items: items.slice(0, MAX_LIST).map(elementDisplay), selected: null, caption: 'answer' };
   return { kind: 'result', text: short(v) };
@@ -149,7 +181,7 @@ function nextSentence(step: Step, trace: Trace): string | null {
 
 export function storyFor(step: Step, trace: Trace): Story {
   const base = buildStory(step);
-  return { ...base, next: base.tone === 'normal' ? nextSentence(step, trace) : null };
+  return { ...base, next: base.tone === 'normal' && step.output?.t !== 'unknown' ? nextSentence(step, trace) : null };
 }
 
 function buildStory(step: Step): Omit<Story, 'next'> {
@@ -203,12 +235,21 @@ function buildStory(step: Step): Omit<Story, 'next'> {
       }
       if (step.title === 'Compare' && out) {
         const yes = out.t === 'bool' && out.v;
+        if (out.t !== 'bool') {
+          const ask = `Check “${step.code.replace(/\s+/g, ' ').trim()}”${out.t === 'unknown' ? '. The answer is not known.' : ' for every item.'}`;
+          return normal('⚖️', out.t === 'unknown' ? '?' : 'compare', ask, [...step.inputs.flatMap((i, n): StoryTile[] => [...(n > 0 ? [{ kind: 'op', text: '?' } as StoryTile] : []), valueTile(i.value, captionOf(i))]), { kind: 'op', text: '=' }, resultTile(out)]);
+        }
         return normal('⚖️', yes ? 'yes' : 'no', `Check: is “${step.code.replace(/\s+/g, ' ').trim()}” true? ${yes ? 'Yes!' : 'No.'}`, [
           ...step.inputs.flatMap((i, n): StoryTile[] => (n === 0 ? [valueTile(i.value, captionOf(i))] : [{ kind: 'op', text: '?' }, valueTile(i.value, captionOf(i))])),
           { kind: 'op', text: '=' },
           { kind: 'result', text: yes ? 'Yes' : 'No' },
         ]);
       }
+      if (out && /^(Build|Take a slice|Select)/.test(step.title)) {
+        const label = step.title.replace(/^Build /, 'new ').toLowerCase();
+        return normal(step.title === 'Build text' ? '✏️' : '🗂️', label, step.explanation.what.replace(/`/g, ''), [...step.inputs.slice(0, 4).map(inputTile), { kind: 'op', text: '→' }, resultTile(out)]);
+      }
+      if (step.title === 'Delete') return normal('🗑️', 'delete', step.explanation.what.replace(/`/g, ''), []);
       if (out) return normal('🧮', 'work out', `Work out “${step.code.replace(/\s+/g, ' ').trim()}”. The answer is ${short(out)}.`, [{ kind: 'op', text: '=' }, resultTile(out)]);
       return normal('🧮', 'work out', 'Work something out.', []);
     }
@@ -306,6 +347,13 @@ function buildStory(step: Step): Omit<Story, 'next'> {
     case 'index': {
       const container = a;
       const index = b;
+      if (out && (step.title === 'Take a slice' || step.title === 'Select (not known)')) {
+        return normal('🔍', out.t === 'unknown' ? '?' : 'part', step.explanation.what.replace(/`/g, ''), [...step.inputs.map(inputTile), { kind: 'op', text: '→' }, resultTile(out)]);
+      }
+      if (container?.value.t === 'dict' && index && out) {
+        const key = short(index.value);
+        return normal('🔍', key, `Look up ${key} in “${nameOf(container)}”. It holds ${short(out)}.`, [valueTile(container.value, nameOf(container), container.fromVariable), { kind: 'op', text: `[${key}]` }, { kind: 'op', text: '=' }, resultTile(out)]);
+      }
       if (!container || !index || !out) return normal('🔍', 'pick', 'Pick something from a list.', []);
       if (container.value.t === 'dataframe' && index.value.t === 'str') {
         const col = index.value.v;
@@ -331,6 +379,15 @@ function buildStory(step: Step): Omit<Story, 'next'> {
     }
     case 'decision': {
       const taken = step.target?.kind === 'branch' && step.target.taken;
+      if (step.title.startsWith('Caught')) return normal('🧤', step.title.toLowerCase(), step.explanation.what, [{ kind: 'result', text: step.title.replace('Caught ', '') }]);
+      if (step.assumption && a) {
+        return normal('🔀', taken ? 'yes?' : 'no?', `“${a.label}” is not known here, so we pretend the answer is ${taken ? 'yes' : 'no'}. You can switch it.`, [
+          { kind: 'value', text: a.label },
+          { kind: 'op', text: '?' },
+          { kind: 'result', text: taken ? 'Yes?' : 'No?' },
+        ]);
+      }
+      if (step.title === 'Conditional expression' && out?.t === 'unknown' && a) return normal('🔀', '?', step.explanation.what.replace(/`/g, ''), [{ kind: 'value', text: a.label }, { kind: 'op', text: '→' }, resultTile(out)]);
       if (!a) return normal('🔀', 'else', 'None of the questions were true, so do the “else” part.', [{ kind: 'result', text: 'else' }]);
       return normal('🔀', taken ? 'yes' : 'no', `Is “${a.label}” true? ${taken ? 'Yes — so do the part inside.' : 'No — so skip that part.'}`, [
         { kind: 'value', text: a.label },
@@ -358,7 +415,17 @@ function buildStory(step: Step): Omit<Story, 'next'> {
       else if (msg.startsWith('NameError')) headline = `Uh-oh! The program asks for a box that does not exist: ${msg.replace('NameError: ', '')}.`;
       return { icon: '⚠️', label: bounds ? `no spot ${bounds[1]}` : 'error', headline, tiles: bounds ? [{ kind: 'op', text: `[${bounds[1]}]` }, { kind: 'op', text: '✗' }] : [], tone: 'error' };
     }
+    case 'unknown': {
+      const m = /([A-Za-z_]\w*)\s*\([^]*\)$/.exec(step.code.trim())?.[1];
+      return {
+        icon: '❔',
+        label: METHOD_LABELS[m ?? ''] ?? m ?? '?',
+        headline: step.explanation.what.replace(/`/g, ''),
+        tiles: [...step.inputs.slice(0, 4).map(inputTile), { kind: 'op', text: '→' }, { kind: 'result', text: '?' }],
+        tone: 'unknown',
+      };
+    }
     case 'unsupported':
-      return { icon: '🚧', label: 'stops here', headline: 'This part is too tricky for the simulator, so it stops here. The code itself is still there to read.', tiles: [], tone: 'stop' };
+      return { icon: '🚧', label: 'skipped', headline: 'This line is too tricky for the simulator, so it is left out. The code itself is still there to read.', tiles: [], tone: 'stop' };
   }
 }

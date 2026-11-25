@@ -34,6 +34,14 @@ export interface RepositoryFile {
   /** Size in bytes of the original file content. */
   readonly size: number;
   readonly category: FileCategory;
+  /** Something the user should know, e.g. that the content is not stored. */
+  readonly note?: string;
+}
+
+/** Everything an import did not keep, with the reason. */
+export interface LeftOut {
+  readonly folders: ReadonlyArray<{ readonly path: string; readonly files: number; readonly bytes: number }>;
+  readonly refused: ReadonlyArray<{ readonly path: string; readonly reason: string }>;
 }
 
 export interface FolderNode {
@@ -55,8 +63,8 @@ export interface FileNode {
 
 export type RepositoryTreeNode = FolderNode | FileNode;
 
-/** Where a project's files come from. More origins arrive with ZIP import (Phase 4) and storage (Phase 6). */
-export type ProjectOrigin = 'demo';
+/** Where a project's files come from. */
+export type ProjectOrigin = 'demo' | 'import';
 
 /**
  * Read-only access to a project's original files.
@@ -71,6 +79,7 @@ export interface ProjectSource {
   readonly origin: ProjectOrigin;
   readonly description?: string;
   readonly files: readonly RepositoryFile[];
+  readonly leftOut?: LeftOut;
   /** Returns the original text of a file, or rejects if the file is unknown or not text. */
   readText(path: string): Promise<string>;
 }

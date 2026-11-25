@@ -21,6 +21,9 @@ export function PlaybackControls({ sim }: { sim: SimulationController }) {
       <button type="button" className="btn btn--icon btn--ghost" onClick={sim.next} disabled={atEnd} title="Next operation (→)" aria-label="Next operation">
         <Icon name="chevronRight" />
       </button>
+      <button type="button" className="btn btn--icon btn--ghost" onClick={sim.stepOver} disabled={atEnd} title="Next line, without going into calls (↓)" aria-label="Next line, without going into calls">
+        <span aria-hidden="true">⤵</span>
+      </button>
       <input
         type="range"
         className="playback__scrub"
@@ -42,6 +45,8 @@ export function PlaybackControls({ sim }: { sim: SimulationController }) {
     </div>
   );
 }
+
+const MAX_FIELDS = 40;
 
 /**
  * Inputs for the run, one compact row each:
@@ -68,7 +73,7 @@ export function InputsPanel({ sim }: { sim: SimulationController }) {
       </p>
       {fields.length > 0 ? (
         <div className="inputs-panel__fields">
-          {fields.map((f) => (
+          {fields.slice(0, MAX_FIELDS).map((f) => (
             <label key={f.input.key} className={`input-field${f.error ? ' has-error' : ''}${f.edited ? ' is-edited' : ''}`}>
               <span className="input-field__name" title={`${f.input.context} · line ${f.input.span.startLine}: ${f.input.code}`}>
                 {f.input.name}
@@ -90,6 +95,7 @@ export function InputsPanel({ sim }: { sim: SimulationController }) {
           ))}
         </div>
       ) : null}
+      {fields.length > MAX_FIELDS ? <p className="inputs-panel__hint">The first {MAX_FIELDS} of {fields.length} values of this file are shown.</p> : null}
       {isMethod ? (
         <h4 className="inputs-panel__group">
           <span aria-hidden="true">🧩</span> make a {sim.scenario?.kind === 'method' ? sim.scenario.className : ''}
@@ -127,15 +133,77 @@ export function InputsPanel({ sim }: { sim: SimulationController }) {
 
 function ParamRows({ sim, params }: { sim: SimulationController; params: SimulationController['params'] }) {
   if (params.length === 0) return null;
+  const plain = params.filter((p) => p.shape === 'value');
   return (
-    <div className="inputs-panel__fields">
-      {params.map((p) => (
+    <>
+      <div className="inputs-panel__fields">{plain.map((p) => row(sim, p))}</div>
+      {params
+        .filter((p) => p.shape !== 'value')
+        .map((p) => (
+          <BigParam key={p.key} sim={sim} param={p} />
+        ))}
+    </>
+  );
+}
+
+/** A table (type rows) or a dictionary (one box per key the code uses). */
+function BigParam({ sim, param: p }: { sim: SimulationController; param: SimulationController['params'][number] }) {
+  return (
+    <div className={`inputs-panel__data${p.error ? ' has-error' : ''}`}>
+      <h4 className="inputs-panel__group">
+        <span aria-hidden="true">{p.shape === 'table' ? '📄' : '🗂️'}</span> {p.name} <small>{p.value ? '' : '= ?'}</small>
+      </h4>
+      {p.shape === 'table' ? (
+        <textarea
+          spellCheck={false}
+          rows={4}
+          value={p.text}
+          placeholder={'column_a,column_b\n1.0,2.0'}
+          onChange={(e) => sim.setParamText(p.key, e.target.value)}
+          onBlur={() => sim.commitParam(p.key)}
+          aria-label={`Rows of the table ${p.name}`}
+        />
+      ) : (
+        <div className="inputs-panel__fields">
+          {p.fields.map((f) => (
+            <label key={f.key} className={`input-field${f.text ? ' is-edited' : ''}`}>
+              <span className="input-field__name" title={f.key}>
+                {f.key}
+              </span>
+              <input
+                type="text"
+                spellCheck={false}
+                placeholder="?"
+                value={f.text}
+                onChange={(e) => sim.setParamField(p.key, f.key, e.target.value)}
+                onBlur={() => sim.commitParam(p.key)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') sim.commitParam(p.key);
+                }}
+                aria-label={`Value for ${p.name}[${f.key}]`}
+              />
+            </label>
+          ))}
+        </div>
+      )}
+      {p.error ? <span className="input-field__error">{p.error}</span> : null}
+      {p.keys.length > 0 ? (
+        <button type="button" className="btn btn--ghost" onClick={() => sim.fillExample(p.key)} title="Made-up numbers, not your data">
+          try made-up numbers
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+function row(sim: SimulationController, p: SimulationController['params'][number]) {
+  return (
         <label key={p.key} className={`input-field${p.error ? ' has-error' : ''}${p.value ? ' is-edited' : ''}`}>
           <span className="input-field__name">{p.name}</span>
           <input
             type="text"
             spellCheck={false}
-            placeholder="e.g. 25.0 or [1, 2, 3]"
+            placeholder="?  (25.0, [1, 2, 3], …)"
             value={p.text}
             onChange={(e) => sim.setParamText(p.key, e.target.value)}
             onBlur={() => sim.commitParam(p.key)}
@@ -146,7 +214,5 @@ function ParamRows({ sim, params }: { sim: SimulationController; params: Simulat
           />
           {p.error ? <span className="input-field__error">{p.error}</span> : null}
         </label>
-      ))}
-    </div>
   );
 }

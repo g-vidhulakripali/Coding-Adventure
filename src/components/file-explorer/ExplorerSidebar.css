@@ -32,3 +32,27 @@
   overflow: auto;
   padding: 0 var(--space-1) var(--space-2);
 }
+
+.left-out {
+  flex: none;
+  border-top: 1px solid var(--color-border);
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+}
+
+.left-out summary {
+  padding: var(--space-2) var(--space-3);
+  cursor: pointer;
+}
+
+.left-out ul {
+  max-height: 160px;
+  margin: 0;
+  padding: 0 var(--space-3) var(--space-2);
+  overflow: auto;
+  list-style: none;
+}
+
+.left-out li {
+  overflow-wrap: anywhere;
+}

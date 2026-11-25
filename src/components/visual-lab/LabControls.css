@@ -154,3 +154,11 @@
   outline: none;
   border-color: var(--color-accent);
 }
+
+.inputs-panel__data textarea {
+  color: var(--color-text);
+}
+
+.inputs-panel__data .inputs-panel__fields {
+  width: 100%;
+}

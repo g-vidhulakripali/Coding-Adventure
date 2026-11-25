@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { buildCallIndex, type CallIndex } from '../../core/analysis/python/callIndex';
+import { callIndexSteps, type CallIndex } from '../../core/analysis/python/callIndex';
 import { parsePythonModule, type Module } from '../../core/parser/python/ast';
+import { csvToDataFrame } from '../../core/simulation/csv';
+import { exampleRows, paramHints, type ParamHint, type ParamShape } from '../../core/simulation/paramShapes';
 import { simulate, type SimulationEntry } from '../../core/simulation/interpreter';
 import { parseLiteral } from '../../core/simulation/literal';
-import { findEditableInputs, findScenarios, type EditableInput, type ScenarioOption } from '../../core/simulation/scenarios';
+import { definitionOf, findEditableInputs, findScenarios, type EditableInput, type ScenarioOption } from '../../core/simulation/scenarios';
 import type { Step, Trace } from '../../core/simulation/trace';
-import { pyRepr, type PyValue } from '../../core/simulation/values';
+import { pyRepr, unknown, type PyValue } from '../../core/simulation/values';
 
 export type PlaybackSpeed = 0.5 | 1 | 2;
 
@@ -17,6 +19,12 @@ export interface ParamInput {
   readonly text: string;
   readonly value: PyValue | null;
   readonly error: string | null;
+  /** What the code expects: a plain value, a table, or a dictionary. */
+  readonly shape: ParamShape;
+  /** For dictionaries: one small box per key the code uses. */
+  readonly fields: ReadonlyArray<{ readonly key: string; readonly text: string }>;
+  /** For tables and dictionaries: columns / keys the code uses. */
+  readonly keys: readonly string[];
 }
 
 export interface InputField {
@@ -41,6 +49,19 @@ export interface SimulationController {
   readonly params: readonly ParamInput[];
   readonly setParamText: (key: string, text: string) => void;
   readonly commitParam: (key: string) => void;
+  /** Types one entry of a dictionary parameter (kept as text until committed). */
+  readonly setParamField: (key: string, field: string, text: string) => void;
+  /** Fills a table or dictionary with made-up example values. */
+  readonly fillExample: (key: string) => void;
+  /** Switches the assumed answer of a decision that is not known. */
+  readonly choose: (key: string, taken: boolean) => void;
+  /** Moves past calls: to the next operation of the same (or an outer) function. */
+  readonly stepOver: () => void;
+  /** Whether the current run goes through this file. */
+  readonly touches: (path: string) => boolean;
+  readonly selectScenarioFor: (path: string) => void;
+  /** Selects the function or method defined at this line. */
+  readonly selectScenarioAt: (path: string, line: number) => void;
   readonly resetInputs: () => void;
   readonly missingParams: readonly string[];
   /** A data file the code reads that is not in the project: the user can paste sample rows for it. */
@@ -65,6 +86,8 @@ export interface SimulationController {
 
 /** Base time per step at 1× speed, including the animation. */
 export const STEP_INTERVAL_MS = 1800;
+
+const NO_MODULES: ReadonlyMap<string, Module> = new Map();
 
 interface ParamSpec {
   readonly key: string;
@@ -91,13 +114,43 @@ export function useSimulationController(
   dataFiles: ReadonlyMap<string, string> | null,
   currentFile: string | null,
 ): SimulationController {
-  const modules = useMemo(() => {
-    const map = new Map<string, Module>();
-    if (sources) for (const [path, text] of sources) map.set(path, parsePythonModule(text));
-    return map;
+  // Analysis runs in short slices, so a large project does not freeze the page.
+  const [modules, setModules] = useState<ReadonlyMap<string, Module>>(NO_MODULES);
+  const [callIndex, setCallIndex] = useState<CallIndex | null>(null);
+  useEffect(() => {
+    setModules(NO_MODULES);
+    setCallIndex(null);
+    if (!sources) return;
+    let cancelled = false;
+    void (async () => {
+      let slice = performance.now();
+      const pause = async () => {
+        if (performance.now() - slice < 24) return;
+        await new Promise((r) => setTimeout(r));
+        slice = performance.now();
+      };
+      const map = new Map<string, Module>();
+      for (const [path, text] of sources) {
+        map.set(path, parsePythonModule(text));
+        await pause();
+        if (cancelled) return;
+      }
+      setModules(map);
+      const steps = callIndexSteps(sources);
+      for (;;) {
+        const r = steps.next();
+        if (r.done) {
+          setCallIndex(r.value);
+          return;
+        }
+        await pause();
+        if (cancelled) return;
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [sources]);
-
-  const callIndex = useMemo(() => (sources ? buildCallIndex(sources) : null), [sources]);
 
   const allScenarios = useMemo(() => {
     const out: ScenarioOption[] = [];
@@ -117,8 +170,9 @@ export function useSimulationController(
   // Pick a default once sources are ready: this file's script; else a script that calls into this
   // file (from the static call index); else a conventional entry point; else this file's first function.
   useEffect(() => {
-    if (scenarioId || allScenarios.length === 0) return;
-    const scripts = allScenarios.filter((s) => s.kind === 'script');
+    if (scenarioId || allScenarios.length === 0 || !callIndex) return;
+    const scripts = allScenarios.filter((s) => s.kind === 'script' && s.isProgram);
+    const here = allScenarios.filter((s) => s.path === currentFile);
     const callsIntoCurrent = (path: string) =>
       callIndex?.calls.some((c) => c.callerId === `${path}::<module>` && c.target.kind === 'internal' && c.target.id.startsWith(`${currentFile}::`)) ?? false;
     const entryRank = (path: string) => {
@@ -129,16 +183,37 @@ export function useSimulationController(
     const pick =
       scripts.find((s) => s.path === currentFile) ??
       scripts.find((s) => callsIntoCurrent(s.path)) ??
+      // In a project of many files, the open file's own function is the natural start.
+      (modules.size > 12 ? here.find((s) => s.kind !== 'script') : undefined) ??
+      here.find((s) => s.kind === 'script') ??
       [...scripts].sort((a, b) => entryRank(a.path) - entryRank(b.path))[0] ??
       allScenarios.find((s) => s.path === currentFile) ??
       null;
     if (pick) setScenarioId(pick.id);
-  }, [allScenarios, currentFile, scenarioId, callIndex]);
+  }, [allScenarios, currentFile, scenarioId, callIndex, modules]);
 
-  const suggestedScenario = useMemo(() => {
-    if (!currentFile || scenario?.path === currentFile) return null;
-    return allScenarios.find((s) => s.path === currentFile && s.kind === 'script') ?? allScenarios.find((s) => s.path === currentFile) ?? null;
-  }, [allScenarios, currentFile, scenario]);
+  const bestFor = useCallback(
+    (path: string) => {
+      const here = allScenarios.filter((s) => s.path === path);
+      return here.find((s) => s.kind === 'script' && s.isProgram) ?? here.find((s) => s.kind !== 'script') ?? here[0] ?? null;
+    },
+    [allScenarios],
+  );
+  const suggestedScenario = useMemo(() => (!currentFile || scenario?.path === currentFile ? null : bestFor(currentFile)), [bestFor, currentFile, scenario]);
+  const selectScenarioFor = useCallback(
+    (path: string) => {
+      const best = bestFor(path);
+      if (best) setScenarioId(best.id);
+    },
+    [bestFor],
+  );
+  const selectScenarioAt = useCallback(
+    (path: string, line: number) => {
+      const hit = allScenarios.find((s) => s.path === path && s.kind !== 'script' && s.line === line);
+      if (hit) setScenarioId(hit.id);
+    },
+    [allScenarios],
+  );
 
   // ---- Inputs ----------------------------------------------------------------
   const editableInputs = useMemo(() => {
@@ -152,6 +227,21 @@ export function useSimulationController(
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [paramTexts, setParamTexts] = useState<Record<string, string>>({});
   const [paramValues, setParamValues] = useState<Map<string, PyValue>>(new Map());
+  const [paramFields, setParamFields] = useState<Record<string, Record<string, string>>>({});
+  const [choices, setChoices] = useState<ReadonlyMap<string, boolean>>(new Map());
+  const choose = useCallback((key: string, taken: boolean) => setChoices((c) => new Map(c).set(key, taken)), []);
+
+  // What the code does with each parameter (which columns, which keys).
+  const hints = useMemo(() => {
+    const out = new Map<string, ParamHint>();
+    const mod = scenario ? modules.get(scenario.path) : undefined;
+    if (!scenario || !mod) return out;
+    for (const [group, init] of [['call', false], ['init', true]] as const) {
+      const def = definitionOf(scenario, mod, init);
+      if (def && (!init || scenario.kind === 'method')) for (const [name, h] of paramHints(def, scenario.path, modules)) out.set(`${group}:${name}`, h);
+    }
+    return out;
+  }, [scenario, modules]);
 
   // Reset per scenario.
   useEffect(() => {
@@ -159,6 +249,8 @@ export function useSimulationController(
     setOverrides(new Map());
     setErrors({});
     setParamTexts({});
+    setParamFields({});
+    setChoices(new Map());
     setParamValues(defaultsFor(scenario));
   }, [scenario?.id]);
 
@@ -187,16 +279,79 @@ export function useSimulationController(
   );
 
   const specs = paramSpecs(scenario);
-  const params: ParamInput[] = specs.map((p) => ({
-    key: p.key,
-    group: p.group,
-    name: p.name,
-    text: paramTexts[p.key] ?? (paramValues.get(p.key) ? pyRepr(paramValues.get(p.key)!) : ''),
-    value: paramValues.get(p.key) ?? null,
-    error: errors[`param:${p.key}`] ?? null,
-  }));
+  const params: ParamInput[] = specs.map((p) => {
+    const hint = hints.get(p.key);
+    // A parameter with a default is a plain box unless the code clearly uses it as a table.
+    const shape: ParamShape = !hint || (p.defaultValue && hint.shape === 'dict') ? 'value' : hint.shape === 'dict' && hint.keys.length === 0 ? 'value' : hint.shape;
+    const value = paramValues.get(p.key) ?? null;
+    const keys = hint?.keys ?? [];
+    return {
+      key: p.key,
+      group: p.group,
+      name: p.name,
+      shape,
+      keys,
+      fields: shape === 'dict' ? keys.map((k) => ({ key: k, text: paramFields[p.key]?.[k] ?? '' })) : [],
+      text: paramTexts[p.key] ?? (shape === 'table' ? keys.join(',') : value ? pyRepr(value) : ''),
+      value,
+      error: errors[`param:${p.key}`] ?? null,
+    };
+  });
+  const shapeOf = (key: string) => params.find((p) => p.key === key)?.shape ?? 'value';
+  const setValue = (key: string, value: PyValue | null, error: string | null = null) => {
+    const errKey = `param:${key}`;
+    setErrors(({ [errKey]: _old, ...rest }) => (error ? { ...rest, [errKey]: error } : rest));
+    if (error) return;
+    setParamValues((prev) => {
+      const next = new Map(prev);
+      if (value) next.set(key, value);
+      else next.delete(key);
+      return next;
+    });
+  };
+  const commitTable = (key: string, text: string) => {
+    if (text.trim().split('\n').length < 2) {
+      setValue(key, null);
+      return;
+    }
+    try {
+      setValue(key, csvToDataFrame(text.trim(), 'This table'));
+    } catch (err) {
+      setValue(key, null, err instanceof Error ? err.message : String(err));
+    }
+  };
+  const commitFields = (key: string, fields: Record<string, string>) => {
+    const entries: Array<readonly [PyValue, PyValue]> = [];
+    const keys = hints.get(key)?.keys ?? [];
+    let given = false;
+    for (const k of keys) {
+      const text = (fields[k] ?? '').trim();
+      const parsed = text === '' ? { ok: true as const, value: unknown(k) } : parseLiteral(text);
+      if (!parsed.ok) {
+        setValue(key, null, `${k}: ${parsed.error}`);
+        return;
+      }
+      if (text !== '') given = true;
+      entries.push([{ t: 'str', v: k }, parsed.value]);
+    }
+    setValue(key, given ? { t: 'dict', entries } : null);
+  };
+  const setParamField = useCallback((key: string, field: string, text: string) => setParamFields((f) => ({ ...f, [key]: { ...f[key], [field]: text } })), []);
+  const fillExample = (key: string) => {
+    const hint = hints.get(key);
+    if (!hint) return;
+    if (shapeOf(key) === 'table') {
+      const text = exampleRows(hint);
+      setParamTexts((t) => ({ ...t, [key]: text }));
+      commitTable(key, text);
+    } else {
+      const fields = Object.fromEntries(hint.keys.map((k, i) => [k, hint.compared.get(k)?.[0] !== undefined ? pyRepr({ t: 'str', v: hint.compared.get(k)![0]! }) : `${i + 1}.0`]));
+      setParamFields((f) => ({ ...f, [key]: fields }));
+      commitFields(key, fields);
+    }
+  };
   const setParamText = useCallback((key: string, text: string) => setParamTexts((t) => ({ ...t, [key]: text })), []);
-  const commitParam = useCallback(
+  const commitPlain = useCallback(
     (key: string) => {
       const text = paramTexts[key];
       if (text === undefined) return;
@@ -221,6 +376,14 @@ export function useSimulationController(
     [paramTexts],
   );
 
+  const commitParam = (key: string) => {
+    const shape = shapeOf(key);
+    if (shape === 'dict') commitFields(key, paramFields[key] ?? {});
+    else if (shape === 'table') {
+      if (paramTexts[key] !== undefined) commitTable(key, paramTexts[key]);
+    } else commitPlain(key);
+  };
+
   // Sample rows the user typed for data files the project does not contain.
   const [dataTexts, setDataTexts] = useState<Record<string, string>>({});
   const [dataOverrides, setDataOverrides] = useState<Map<string, string>>(new Map());
@@ -244,6 +407,8 @@ export function useSimulationController(
     setOverrides(new Map());
     setErrors({});
     setParamTexts({});
+    setParamFields({});
+    setChoices(new Map());
     setParamValues(defaultsFor(scenario));
   }, [scenario]);
 
@@ -256,13 +421,13 @@ export function useSimulationController(
   const trace = useMemo(() => {
     if (!sources || !scenario) return null;
     let entry: SimulationEntry;
-    if (paramSpecs(scenario).some((p) => !paramValues.has(p.key))) return null;
+    // Arguments without a value stay unknown (`?`): the function can be read right away.
     if (scenario.kind === 'script') entry = { kind: 'script', path: scenario.path };
     else if (scenario.kind === 'method') {
       entry = { kind: 'method', path: scenario.path, className: scenario.className, method: scenario.method, initArgs: pick('init'), args: pick('call') };
     } else entry = { kind: 'function', path: scenario.path, name: scenario.name, args: pick('call') };
-    return simulate({ sources, dataFiles: allDataFiles }, entry, { overrides });
-  }, [sources, allDataFiles, scenario, overrides, paramValues]); // pick/specs derive from scenario + paramValues
+    return simulate({ sources, dataFiles: allDataFiles }, entry, { overrides, choices });
+  }, [sources, allDataFiles, scenario, overrides, paramValues, choices]); // pick/specs derive from scenario + paramValues
 
   const missingPath = trace?.stop?.kind === 'missing-data' ? trace.stop.path ?? null : null;
   const suppliedPath = [...dataOverrides.keys()].find((p) => trace?.steps.some((st) => st.explanation.what.includes(p))) ?? null;
@@ -293,6 +458,20 @@ export function useSimulationController(
     [total],
   );
   const next = useCallback(() => goTo(stepIndex + 1), [goTo, stepIndex]);
+  const stepOver = useCallback(() => {
+    if (!trace) return;
+    const depth = trace.steps[stepIndex]?.frames.length ?? 0;
+    const from = trace.steps[stepIndex];
+    // Past calls: stop at the next line of this function, or wherever it returns to.
+    let i = stepIndex + 1;
+    while (i < trace.steps.length - 1) {
+      const s = trace.steps[i]!;
+      if (s.frames.length < depth || (s.frames.length === depth && (s.frameId !== from?.frameId || s.span.startLine !== from?.span.startLine))) break;
+      i++;
+    }
+    goTo(i);
+  }, [goTo, stepIndex, trace]);
+  const touches = useCallback((path: string) => trace?.steps.some((s) => s.span.path === path) ?? false, [trace]);
   const prev = useCallback(() => {
     setPlaying(false);
     goTo(stepIndex - 1);
@@ -322,7 +501,7 @@ export function useSimulationController(
   }, [playing, stepIndex, total, speed, goTo]);
 
   return {
-    ready: sources !== null,
+    ready: sources !== null && (modules.size > 0 || sources.size === 0),
     sources,
     scenarios,
     scenario,
@@ -334,6 +513,13 @@ export function useSimulationController(
     params,
     setParamText,
     commitParam,
+    setParamField,
+    fillExample,
+    choose,
+    stepOver,
+    touches,
+    selectScenarioFor,
+    selectScenarioAt,
     resetInputs,
     missingParams,
     missingData,

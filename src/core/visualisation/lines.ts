@@ -17,7 +17,7 @@ export type LineStatus = 'done' | 'current' | 'active' | 'pending' | 'skipped';
 export interface LineNode {
   readonly kind: 'stmt' | 'block';
   /** For blocks: what kind of container this is. */
-  readonly label?: 'if' | 'if-branch' | 'elif' | 'else' | 'for' | 'while' | 'def' | 'class';
+  readonly label?: 'if' | 'if-branch' | 'elif' | 'else' | 'for' | 'while' | 'def' | 'class' | 'with' | 'try' | 'except' | 'finally';
   /** Exact source text (blocks: the header line). */
   readonly code: string;
   readonly line: number;
@@ -78,10 +78,52 @@ const show = (step: Step | undefined) => {
 function findDef(stmts: readonly Stmt[], name: string): FunctionDef | null {
   for (const s of stmts) {
     if (s.type === 'FunctionDef' && s.name === name) return s;
-    const inner = s.type === 'FunctionDef' || s.type === 'ClassDef' ? findDef(s.body, name) : s.type === 'If' ? findDef([...s.branches.flatMap((b) => b.body), ...(s.orelse ?? [])], name) : null;
+    const inner = findDef(innerBlocks(s), name);
     if (inner) return inner;
   }
   return null;
+}
+
+function innerBlocks(s: Stmt): readonly Stmt[] {
+  switch (s.type) {
+    case 'FunctionDef':
+    case 'ClassDef':
+    case 'With':
+      return s.body;
+    case 'If':
+      return [...s.branches.flatMap((b) => b.body), ...(s.orelse ?? [])];
+    case 'For':
+    case 'While':
+      return [...s.body, ...s.orelse];
+    case 'Try':
+      return [...s.body, ...s.handlers.flatMap((h) => h.body), ...s.orelse, ...s.finalbody];
+    default:
+      return [];
+  }
+}
+
+/** Finds a definition by its qualified name, so equal method names in different classes are not mixed up. */
+function findQualified(stmts: readonly Stmt[], qualname: string): FunctionDef | null {
+  const search = (list: readonly Stmt[], part: string): Extract<Stmt, { type: 'FunctionDef' | 'ClassDef' }> | null => {
+    for (const s of list) {
+      if (s.type === 'FunctionDef' || s.type === 'ClassDef') {
+        if (s.name === part) return s;
+        continue;
+      }
+      const inner = search(innerBlocks(s), part);
+      if (inner) return inner;
+    }
+    return null;
+  };
+  let scope = stmts;
+  let found: FunctionDef | null = null;
+  for (const part of qualname.split('.').filter((p) => p !== '<locals>')) {
+    const hit = search(scope, part);
+    if (!hit) return null;
+    found = hit.type === 'FunctionDef' ? hit : null;
+    scope = hit.body;
+  }
+  return found;
 }
 
 export function buildLineView(trace: Trace, index: number, sources: ReadonlyMap<string, string>): LineView | null {
@@ -117,7 +159,7 @@ export function buildLineView(trace: Trace, index: number, sources: ReadonlyMap<
   };
 
   const stmtChip = (line: number, endLine: number): string | null => {
-    const s = last(line, endLine, ['assign', 'return', 'print', 'error', 'unsupported']);
+    const s = last(line, endLine, ['assign', 'return', 'print', 'error', 'unknown', 'unsupported']);
     if (!s) {
       const any = last(line, endLine);
       return any && any.kind !== 'define' && any.kind !== 'import' && any.kind !== 'call' && any.kind !== 'enter' ? show(any) : null;
@@ -131,6 +173,8 @@ export function buildLineView(trace: Trace, index: number, sources: ReadonlyMap<
         return `🖥 ${s.inputs.map((i) => (i.value.t === 'str' ? i.value.v : displayValue(i.value, 14))).join(' ')}`;
       case 'error':
         return '✗';
+      case 'unknown':
+        return '= ?';
       default:
         return '🚧';
     }
@@ -159,22 +203,22 @@ export function buildLineView(trace: Trace, index: number, sources: ReadonlyMap<
         let anyTaken = false;
         s.branches.forEach((b, i) => {
           const r = range(b.span);
-          const decision = last(r.line, r.line, ['decision']);
+          const decision = last(r.line, r.endLine, ['decision']);
           const taken = decision?.target?.kind === 'branch' ? decision.target.taken : null;
           if (taken) anyTaken = true;
           const skipped = forcedSkip || taken === false || (taken === null && anyTaken);
           const children = convert(b.body, skipped || taken !== true);
           const childCurrent = children.some((c) => c.status === 'current' || c.status === 'active');
           const bodyEnd = b.body.length ? range(b.body[b.body.length - 1]!.span).endLine : r.endLine;
-          const own = statusFor(r.line, r.line, false);
+          const own = statusFor(r.line, r.endLine, false);
           branches.push({
             kind: 'block',
             label: i === 0 ? 'if-branch' : 'elif',
-            code: text(r.line).replace(/:$/, ''),
+            code: text(r.line, r.endLine).replace(/:$/, ''),
             line: r.line,
             endLine: bodyEnd,
             status: own === 'current' ? 'current' : skipped ? 'skipped' : childCurrent ? 'active' : own,
-            chip: taken === null ? null : taken ? 'yes' : 'no',
+            chip: taken === null ? null : `${taken ? 'yes' : 'no'}${decision?.assumption ? '?' : ''}`,
             children: taken === true ? children : children.map((c) => ({ ...c, status: c.status === 'current' ? c.status : skippedStatus(c, taken === false || anyTaken) })),
           });
         });
@@ -208,7 +252,7 @@ export function buildLineView(trace: Trace, index: number, sources: ReadonlyMap<
         const childCurrent = children.some((c) => c.status === 'current' || c.status === 'active');
         const loopStep = last(header.line, header.line, ['loop', 'decision']);
         const iter = loopStep ? /Iteration (\d+) of (\d+)/.exec(loopStep.title) : null;
-        const chip = iter ? `${iter[1]}/${iter[2]}` : loopStep?.title === 'Loop finished' ? '✓' : null;
+        const chip = loopStep?.title === 'One example item' ? '1/?' : iter ? `${iter[1]}/${iter[2]}` : loopStep?.title === 'Loop finished' ? '✓' : null;
         return [
           {
             kind: 'block',
@@ -221,6 +265,27 @@ export function buildLineView(trace: Trace, index: number, sources: ReadonlyMap<
             children,
           },
         ];
+      }
+      if (s.type === 'With' || s.type === 'Try') {
+        const container = (label: LineNode['label'], code: string, line: number, body: readonly Stmt[], skip: boolean, own: LineStatus): LineNode => {
+          const children = convert(body, skip);
+          const inside = children.some((c) => c.status === 'current' || c.status === 'active');
+          const endLine = body.length ? range(body[body.length - 1]!.span).endLine : line;
+          const ran = children.some((c) => c.status === 'done');
+          return { kind: 'block', label, code, line, endLine, status: skip ? 'skipped' : own === 'current' ? 'current' : inside ? 'active' : own === 'pending' && ran ? 'done' : own, chip: null, children };
+        };
+        const head = range(s.headerSpan);
+        if (s.type === 'With') return [container('with', text(head.line, head.endLine).replace(/:$/, ''), head.line, s.body, forcedSkip, statusFor(head.line, head.endLine, false))];
+        const parts = [container('try', 'try', head.line, s.body, forcedSkip, 'pending')];
+        const bodyDone = s.body.length > 0 && s.body.every((b) => last(range(b.span).line, range(b.span).endLine));
+        for (const h of s.handlers) {
+          const r = range(h.span);
+          const caught = last(r.line, r.line, ['decision']) !== undefined;
+          parts.push(container('except', text(r.line).replace(/:$/, ''), r.line, h.body, forcedSkip || (!caught && bodyDone), statusFor(r.line, r.line, false)));
+        }
+        if (s.elseSpan) parts.push(container('else', 'else', range(s.elseSpan).line, s.orelse, forcedSkip, 'pending'));
+        if (s.finallySpan) parts.push(container('finally', 'finally', range(s.finallySpan).line, s.finalbody, forcedSkip, 'pending'));
+        return parts;
       }
       const r = range(s.span);
       return [{ kind: 'stmt', code: text(r.line, r.endLine), ...r, status: forcedSkip ? 'skipped' : statusFor(r.line, r.endLine, false), chip: forcedSkip ? null : stmtChip(r.line, r.endLine), children: [] }];
@@ -236,7 +301,7 @@ export function buildLineView(trace: Trace, index: number, sources: ReadonlyMap<
     nodes = convert(file.module.body, false);
   } else {
     const name = current.name.split('.').pop() ?? current.name;
-    const def = findDef(file.module.body, name);
+    const def = findQualified(file.module.body, current.name) ?? findDef(file.module.body, name);
     const params = def
       ? def.params.map((p) => {
           const v = current.vars.find((x) => x.name === p.name);

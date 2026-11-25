@@ -1,0 +1,92 @@
+.import-card.is-over {
+  border-color: var(--color-accent);
+  background: var(--color-accent-soft);
+}
+
+.import-card__buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.import-card__progress {
+  display: grid;
+  gap: var(--space-1);
+  width: 100%;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.import-card__progress progress {
+  width: 100%;
+  accent-color: var(--color-accent);
+}
+
+.import-card__progress .btn {
+  justify-self: start;
+}
+
+.import-card__path {
+  min-height: 1.4em;
+  overflow: hidden;
+  color: var(--color-text-faint);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-card__body p.import-card__error {
+  flex: none;
+  color: var(--color-danger);
+}
+
+.saved-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: 100%;
+  max-height: 220px;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+}
+
+.saved-list li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.saved-list__open {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-2);
+  color: var(--color-text);
+  font-family: var(--font-mono);
+  text-align: left;
+  cursor: pointer;
+}
+
+.saved-list__open:hover {
+  border-color: var(--color-accent);
+}
+
+.saved-list__open b {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.saved-list__open small {
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+}
+
+.btn--danger {
+  border-color: var(--color-danger);
+  color: var(--color-danger);
+}

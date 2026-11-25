@@ -356,3 +356,7 @@
   color: var(--color-text-faint);
   text-align: center !important;
 }
+
+.story.is-unknown .tile--result {
+  border-style: dashed;
+}

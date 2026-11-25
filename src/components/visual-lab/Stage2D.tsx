@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useRef } from 'react';
+import { useLayoutEffect, useMemo, useRef, type ReactNode } from 'react';
 import type { Trace } from '../../core/simulation/trace';
 import { buildLineView, type LineNode } from '../../core/visualisation/lines';
 import type { Scene, SceneValue } from '../../core/visualisation/scene';
@@ -11,6 +11,8 @@ export interface Stage2DProps {
   readonly stepIndex: number;
   readonly sources: ReadonlyMap<string, string>;
   readonly durationMs?: number;
+  /** Switches the assumed answer of a decision that is not known. */
+  readonly onChoose?: (key: string, taken: boolean) => void;
 }
 
 /**
@@ -20,7 +22,18 @@ export interface Stage2DProps {
  * containers. A call opens the called function's container; the caller waits
  * above as a one-line card.
  */
-export function Stage2D({ scene, trace, stepIndex, sources, durationMs = 0 }: Stage2DProps) {
+export function Stage2D({ scene, trace, stepIndex, sources, durationMs = 0, onChoose }: Stage2DProps) {
+  const assumption = trace.steps[stepIndex]?.assumption ?? null;
+  const chooser =
+    assumption && onChoose ? (
+      <div className="lines2d__choose" role="group" aria-label="The answer is not known. Choose which way to go.">
+        {([true, false] as const).map((taken) => (
+          <button key={String(taken)} type="button" aria-pressed={assumption.taken === taken} onClick={() => onChoose(assumption.key, taken)}>
+            {taken ? 'yes' : 'no'}
+          </button>
+        ))}
+      </div>
+    ) : null;
   const root = useRef<HTMLDivElement>(null);
   const view = useMemo(() => buildLineView(trace, stepIndex, sources), [trace, stepIndex, sources]);
   const current = scene.frames[scene.frames.length - 1];
@@ -157,7 +170,7 @@ export function Stage2D({ scene, trace, stepIndex, sources, durationMs = 0 }: St
           {view.nodes.length > 0 ? (
             <ol className="lines2d__list">
               {view.nodes.map((n, i) => (
-                <LineRow key={i} node={n} scene={scene} />
+                <LineRow key={i} node={n} scene={scene} extra={chooser} />
               ))}
             </ol>
           ) : null}
@@ -195,10 +208,10 @@ export function Stage2D({ scene, trace, stepIndex, sources, durationMs = 0 }: St
   );
 }
 
-const BLOCK_ICON: Record<string, string> = { if: '🔀', 'if-branch': '', elif: '', else: '', for: '🔁', while: '🔁', def: '📜', class: '🧩' };
+const BLOCK_ICON: Record<string, string> = { if: '🔀', 'if-branch': '', elif: '', else: '', for: '🔁', while: '🔁', def: '📜', class: '🧩', with: '🔓', try: '🧪', except: '🧤', finally: '🏁' };
 
 /** One source line, or a container (if / loop / class) with its lines inside. */
-function LineRow({ node, scene }: { node: LineNode; scene: Scene }) {
+function LineRow({ node, scene, extra }: { node: LineNode; scene: Scene; extra: ReactNode }) {
   const isBlock = node.kind === 'block';
   return (
     <li className={`ln is-${node.status}${isBlock ? ` ln--block ln--${node.label}` : ''}`}>
@@ -207,18 +220,19 @@ function LineRow({ node, scene }: { node: LineNode; scene: Scene }) {
           <span className="ln__no">{node.line}</span>
           {isBlock && BLOCK_ICON[node.label ?? ''] ? <span aria-hidden="true">{BLOCK_ICON[node.label ?? '']}</span> : null}
           <code className="ln__code">{node.code}</code>
-          {node.chip && node.status !== 'current' ? <span className={`lines2d__chip${node.chip === 'no' || node.chip === '✗' ? ' is-no' : node.chip === 'yes' ? ' is-yes' : ''}`}>{node.chip}</span> : null}
+          {node.chip && node.status !== 'current' ? <span className={`lines2d__chip${node.chip === 'no' || node.chip === '✗' ? ' is-no' : node.chip.includes('?') ? ' is-unknown' : node.chip === 'yes' ? ' is-yes' : ''}`}>{node.chip}</span> : null}
         </div>
       ) : null}
       {node.status === 'current' ? (
         <div className="ln__story">
           <StoryBanner story={scene.story} variant="row" />
+          {extra}
         </div>
       ) : null}
       {node.children.length > 0 ? (
         <ol className="ln__children">
           {node.children.map((c, i) => (
-            <LineRow key={i} node={c} scene={scene} />
+            <LineRow key={i} node={c} scene={scene} extra={extra} />
           ))}
         </ol>
       ) : null}

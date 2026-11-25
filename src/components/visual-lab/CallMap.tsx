@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent, type WheelEvent } from 'react';
 import type { CallIndex, CallSite } from '../../core/analysis/python/callIndex';
 import type { LineRange } from '../../core/source-mapping/types';
-import { layoutCallMap, NODE_HEIGHT, NODE_WIDTH, type MapEdge, type MapNode } from '../../core/visualisation/callMapLayout';
+import { FOCUS_THRESHOLD, layoutCallMap, NODE_HEIGHT, NODE_WIDTH, type MapEdge, type MapNode } from '../../core/visualisation/callMapLayout';
 import { EvidenceBadge } from '../explanation/EvidenceBadge';
 import './CallMap.css';
 
@@ -19,8 +19,16 @@ const FILE_COLORS = ['--lab-variable', '--lab-function', '--lab-loop', '--lab-de
  */
 export function CallMap({ index, currentFile, onNavigate }: CallMapProps) {
   const [showExternal, setShowExternal] = useState(false);
-  const layout = useMemo(() => layoutCallMap(index, { showExternal }), [index, showExternal]);
+  const large = index.definitions.length > FOCUS_THRESHOLD;
+  const [whole, setWhole] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
+  const focused = large && !whole;
+  const focus = focused ? (selected && index.definitions.some((d) => d.id === selected) ? selected : defaultDefinition(index, currentFile)) : null;
+  const layout = useMemo(() => layoutCallMap(index, { showExternal, focus }), [index, showExternal, focus]);
+  // Opening another file moves the focus to it.
+  useEffect(() => {
+    if (focused) setSelected(defaultDefinition(index, currentFile));
+  }, [focused, currentFile, index]);
   const [view, setView] = useState({ x: 0, y: 0, k: 1 });
   const svgRef = useRef<SVGSVGElement>(null);
   const drag = useRef<{ x: number; y: number; vx: number; vy: number; moved: boolean } | null>(null);
@@ -92,6 +100,23 @@ export function CallMap({ index, currentFile, onNavigate }: CallMapProps) {
   return (
     <div className="callmap">
       <div className="callmap__toolbar">
+        {large ? (
+          <>
+            <select className="callmap__pick" value={focus ?? selected ?? ''} onChange={(e) => setSelected(e.target.value)} aria-label="Function to look at">
+              {index.definitions
+                .filter((d) => d.path === currentFile || d.id === focus || d.id === selected)
+                .map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.kind === 'module' ? d.path : d.qualname}
+                  </option>
+                ))}
+            </select>
+            <label className="callmap__toggle">
+              <input type="checkbox" checked={whole} onChange={(e) => setWhole(e.target.checked)} />
+              whole project ({index.definitions.length})
+            </label>
+          </>
+        ) : null}
         <label className="callmap__toggle">
           <input type="checkbox" checked={showExternal} onChange={(e) => setShowExternal(e.target.checked)} />
           show built-in, library &amp; unresolved calls
@@ -194,6 +219,11 @@ export function CallMap({ index, currentFile, onNavigate }: CallMapProps) {
       ) : null}
     </div>
   );
+}
+
+function defaultDefinition(index: CallIndex, currentFile: string | null): string | null {
+  const here = index.definitions.filter((d) => d.path === currentFile);
+  return (here.find((d) => d.kind !== 'module' && d.kind !== 'class') ?? here[0] ?? index.definitions[0])?.id ?? null;
 }
 
 function describeTarget(site: CallSite, nodes: Map<string, MapNode>): string {

@@ -7,7 +7,7 @@ A browser-based application for understanding unfamiliar code repositories throu
 - No AI models or AI APIs.
 - Deploys as a static website.
 
-> **Status: Phase 2 (interactive visual laboratory) complete**, plus a static call map. You can step through Python code in a 3D lab (with a 2D fallback), edit inputs, and follow values across files, with every step tied to its exact source. ZIP import, persistent storage and full Tree-sitter analysis are later phases. See [docs/IMPLEMENTATION_LOG.md](docs/IMPLEMENTATION_LOG.md) and [docs/LIMITATIONS.md](docs/LIMITATIONS.md).
+> **Status: Phase 2 (interactive visual laboratory) complete**, plus a static call map, and importing your own folders and ZIPs, saved in the browser. You can step through Python code line by line (or on a 3D bench), edit inputs, and follow values across files, with every step tied to its exact source. What cannot be computed shows as `?`, never as a guess. File previews and full Tree-sitter analysis are later phases. See [docs/IMPLEMENTATION_LOG.md](docs/IMPLEMENTATION_LOG.md) and [docs/LIMITATIONS.md](docs/LIMITATIONS.md).
 
 ## Getting started
 
@@ -28,7 +28,12 @@ The `dist/` folder uses relative asset paths and hash routing, so it can be serv
 
 | Action | How |
 |---|---|
+| Open your project | **choose folder** or **choose ZIP** on the start page, or drop it there |
+| Open it again | **Saved projects** on the start page |
 | Open the sample | **Open sample** on the start page |
+| Run one function | Click it in the **Outline**. Values you do not give stay `?` |
+| Skip over calls | <kbd>↓</kbd>, or the ⤵ button |
+| Switch an assumed answer | The **yes / no** buttons on its line |
 | Switch layout | Header layout buttons, or <kbd>Alt</kbd>+<kbd>1</kbd> Code + Lab + Explain · <kbd>2</kbd> Code + Lab · <kbd>3</kbd> Code only · <kbd>4</kbd> Lab only |
 | Show / hide files | Sidebar button in the header |
 | Resize panels | Drag a divider, or focus it and press <kbd>←</kbd>/<kbd>→</kbd>. Double-click to reset |
@@ -51,6 +56,7 @@ src/
 ├── components/
 │   ├── layout/          Header, panels, resizable row, layout modes
 │   ├── code-editor/     CodeMirror 6 viewer, source highlight, outline list
+│   ├── import/          Import card, saved projects
 │   ├── file-explorer/   Repository tree, filter, sidebar
 │   ├── visual-lab/      Simulation controller, 3D stage (three/), 2D stage, step card, call map
 │   ├── explanation/     Explanation panel, evidence badges
@@ -62,7 +68,8 @@ src/
 │   ├── parser/          Outline + python/ast.ts (Python AST adapter with exact spans)
 │   ├── simulation/      Deterministic JS model of a Python subset (+ pandas/NumPy subset)
 │   ├── visualisation/   Renderer-independent scene model, call-map layout
-│   └── project/         Project registry (where ProjectSources come from)
+│   ├── import/          Folder / ZIP reading, safety checks, limits
+│   └── project/         Project registry, saved projects (IndexedDB)
 ├── demo/                Bundled sample repository, kept separate from real analysis
 ├── hooks/               Theme, media query, persisted preferences
 ├── styles/              Design tokens and global styles
