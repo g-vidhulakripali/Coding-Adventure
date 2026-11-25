@@ -82,6 +82,7 @@ pre {
 /* ---- Shared controls ---------------------------------------------------- */
 
 .btn {
+  font-family: var(--font-ui);
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
@@ -115,6 +116,7 @@ pre {
   background: var(--color-accent);
   border-color: transparent;
   color: var(--color-accent-contrast);
+  box-shadow: var(--glow-accent);
 }
 
 .btn--primary:hover:not(:disabled) {
@@ -134,6 +136,7 @@ pre {
 }
 
 .chip {
+  font-family: var(--font-ui);
   display: inline-flex;
   align-items: center;
   gap: var(--space-1);
@@ -151,4 +154,22 @@ pre {
   width: 16px;
   height: 16px;
   flex: none;
+}
+
+/* Coder theme: UI chrome in the mono face */
+.panel__title,
+.app-header__name,
+.workspace__project-name,
+.file-tree__row,
+.outline__row,
+.mode-switcher,
+.compact-tabs__tab,
+.explain__heading,
+.vocab__title,
+.evidence-badge {
+  font-family: var(--font-ui);
+}
+
+::selection {
+  background: color-mix(in srgb, var(--color-accent) 30%, transparent);
 }

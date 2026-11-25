@@ -126,3 +126,139 @@
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
+
+/* ---- Simulation step explanation ------------------------------------------ */
+
+.explain__step-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  font-family: var(--font-ui);
+}
+
+.explain__lead {
+  font-size: var(--text-md);
+  line-height: 1.55;
+}
+
+.explain__why {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.explain__why > span,
+.explain__io > span {
+  margin-right: var(--space-1);
+  color: var(--color-text-faint);
+  font-family: var(--font-ui);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.explain__io {
+  display: grid;
+  grid-template-columns: 40px 1fr;
+  align-items: start;
+  font-size: var(--text-sm);
+}
+
+.explain__io ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow-wrap: anywhere;
+}
+
+.explain__io b {
+  font-family: var(--font-mono);
+}
+
+.explain__io small,
+.explain__vars td:last-child {
+  color: var(--color-text-faint);
+  font-size: 10.5px;
+}
+
+.explain__note {
+  color: var(--color-warning-text);
+  font-size: var(--text-xs);
+}
+
+.explain__link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--color-accent);
+  font-family: var(--font-ui);
+  font-size: var(--text-xs);
+  text-decoration: underline dotted;
+}
+
+.explain__frame {
+  padding: var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  opacity: 0.7;
+}
+
+.explain__frame.is-current {
+  border-color: color-mix(in srgb, var(--color-accent) 50%, var(--color-border));
+  opacity: 1;
+}
+
+.explain__frame-name {
+  margin-bottom: 4px;
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.explain__vars {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.explain__vars th {
+  padding: 1px var(--space-2) 1px 0;
+  font-weight: 700;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.explain__vars td {
+  padding: 1px var(--space-2) 1px 0;
+  overflow-wrap: anywhere;
+}
+
+.explain__vars tr.is-changed th,
+.explain__vars tr.is-changed td:nth-child(2) {
+  color: var(--lab-value);
+}
+
+.explain__console {
+  margin: 0;
+  padding: var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--code-bg);
+  color: var(--color-accent);
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+
+.explain__run {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: var(--space-2) 0 0;
+  padding-left: var(--space-4);
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+}
+
+.explain__stop {
+  color: var(--color-warning-text);
+}

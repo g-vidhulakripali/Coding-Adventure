@@ -8,12 +8,15 @@ import { Icon } from '../common/Icon';
 import { formatBytes } from '../file-explorer/FileExplorer';
 import { Panel } from '../layout/Panel';
 import { EvidenceBadge } from './EvidenceBadge';
+import { SimulationExplanation } from './SimulationExplanation';
+import type { SimulationController } from '../visual-lab/useSimulationController';
 import './ExplanationPanel.css';
 
 export interface ExplanationPanelProps {
   readonly file: RepositoryFile | null;
   readonly lineCount: number | null;
   readonly outline: FileOutline | null;
+  readonly sim?: SimulationController;
   readonly onCollapse?: () => void;
 }
 
@@ -24,7 +27,7 @@ export interface ExplanationPanelProps {
  * original repository and the parsed outline. Operation explanations arrive
  * with the visual laboratory (Phase 2) and static analysis (Phase 3).
  */
-export function ExplanationPanel({ file, lineCount, outline, onCollapse }: ExplanationPanelProps) {
+export function ExplanationPanel({ file, lineCount, outline, sim, onCollapse }: ExplanationPanelProps) {
   const symbols = outline ? flattenOutline(outline.symbols) : [];
   const classes = symbols.filter((s) => s.kind === 'class').length;
   const functions = symbols.length - classes;
@@ -43,6 +46,7 @@ export function ExplanationPanel({ file, lineCount, outline, onCollapse }: Expla
       }
     >
       <div className="explain">
+        {sim?.trace && sim.step ? <SimulationExplanation sim={sim} /> : null}
         {file ? (
           <section className="explain__section">
             <h3 className="explain__heading">This file</h3>
@@ -80,13 +84,12 @@ export function ExplanationPanel({ file, lineCount, outline, onCollapse }: Expla
           <p className="explain__muted">Select a file to see what is known about it.</p>
         )}
 
-        <section className="explain__section">
-          <h3 className="explain__heading">Operation explanations</h3>
-          <p className="explain__muted">
-            Not available yet. Step-by-step explanations of what each operation does, with its inputs and outputs, come with the
-            visual laboratory (Phase 2) and Python analysis (Phase 3).
-          </p>
-        </section>
+        {!sim?.trace ? (
+          <section className="explain__section">
+            <h3 className="explain__heading">Operation explanations</h3>
+            <p className="explain__muted">Choose something to run in the Visual Lab to see each operation explained here.</p>
+          </section>
+        ) : null}
 
         <details className="explain__section explain__legend">
           <summary className="explain__heading">How to read the badges</summary>

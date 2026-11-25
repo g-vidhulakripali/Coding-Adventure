@@ -1,10 +1,10 @@
 import { CATEGORY_INFO, isTextCategory, viewerLanguageFor } from '../../core/repository/fileTypes';
 import type { RepositoryFile } from '../../core/repository/types';
-import type { LineRange } from '../../core/source-mapping/types';
 import { Icon } from '../common/Icon';
 import { formatBytes } from '../file-explorer/FileExplorer';
 import { Panel } from '../layout/Panel';
 import { CodeViewer } from './CodeViewer';
+import type { ViewerHighlight } from './codemirrorSetup';
 import './CodePanel.css';
 
 export type FileContentState =
@@ -16,7 +16,7 @@ export type FileContentState =
 export interface CodePanelProps {
   readonly file: RepositoryFile | null;
   readonly content: FileContentState;
-  readonly highlight: LineRange | null;
+  readonly highlight: ViewerHighlight | null;
   readonly onLineClick: (line: number) => void;
   readonly onClearHighlight: () => void;
 }

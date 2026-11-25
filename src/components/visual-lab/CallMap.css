@@ -1,0 +1,258 @@
+.callmap {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.callmap__empty {
+  padding: var(--space-5);
+  color: var(--color-text-muted);
+}
+
+.callmap__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-1) var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+  font-size: var(--text-xs);
+}
+
+.callmap__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--color-text-muted);
+  font-family: var(--font-ui);
+}
+
+.callmap__toggle input {
+  accent-color: var(--color-accent);
+}
+
+.callmap__legend {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--color-text-faint);
+  font-family: var(--font-ui);
+}
+
+.callmap__legend i {
+  display: inline-block;
+  width: 18px;
+  height: 0;
+  margin-left: var(--space-2);
+  border-top: 2px solid var(--evidence-static);
+}
+
+.callmap__legend i.is-inferred {
+  border-top: 2px dashed var(--evidence-inferred);
+}
+
+.callmap__legend i.is-external {
+  border-top: 2px dotted var(--color-text-faint);
+}
+
+.callmap__fit {
+  height: 24px;
+  margin-left: auto;
+  font-size: var(--text-xs);
+}
+
+.callmap__canvas {
+  flex: 1;
+  min-height: 160px;
+  width: 100%;
+  cursor: grab;
+  touch-action: none;
+  background-image: radial-gradient(circle, var(--color-border) 1px, transparent 1.2px);
+  background-size: 18px 18px;
+}
+
+.callmap__canvas:active {
+  cursor: grabbing;
+}
+
+.callmap__node {
+  cursor: pointer;
+  transition: opacity var(--motion-fast) ease;
+}
+
+.callmap__node:focus {
+  outline: none;
+}
+
+.callmap__node:focus-visible .callmap__box {
+  stroke: var(--color-focus);
+  stroke-width: 2;
+}
+
+.callmap__box {
+  fill: var(--color-surface);
+  stroke: color-mix(in srgb, var(--node-color) 55%, var(--color-border));
+  stroke-width: 1.2;
+}
+
+.callmap__node.is-module .callmap__box {
+  stroke-dasharray: 4 3;
+  fill: var(--color-surface-2);
+}
+
+.callmap__node.is-builtin .callmap__box,
+.callmap__node.is-library .callmap__box {
+  fill: var(--color-surface-2);
+  stroke: var(--color-border-strong);
+}
+
+.callmap__node.is-unresolved .callmap__box {
+  fill: transparent;
+  stroke: var(--color-text-faint);
+  stroke-dasharray: 3 3;
+}
+
+.callmap__node.is-selected .callmap__box {
+  stroke: var(--node-color);
+  stroke-width: 2.4;
+  filter: drop-shadow(0 0 6px color-mix(in srgb, var(--node-color) 45%, transparent));
+}
+
+.callmap__node.is-dimmed {
+  opacity: 0.35;
+}
+
+.callmap__stripe {
+  fill: var(--node-color);
+}
+
+.callmap__label {
+  fill: var(--color-text);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  font-weight: 700;
+}
+
+.callmap__sublabel {
+  fill: var(--color-text-faint);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.callmap__edge path {
+  fill: none;
+  stroke: var(--evidence-static);
+  stroke-width: 1.6;
+  opacity: 0.75;
+  transition: opacity var(--motion-fast) ease;
+}
+
+.callmap__edge.is-inferred path {
+  stroke: var(--evidence-inferred);
+  stroke-dasharray: 6 4;
+}
+
+.callmap__edge.is-external path,
+.callmap__edge.is-unresolved path {
+  stroke: var(--color-text-faint);
+  stroke-dasharray: 2 4;
+}
+
+.callmap__edge.is-active path {
+  stroke-width: 2.6;
+  opacity: 1;
+}
+
+.callmap__edge.is-dimmed {
+  opacity: 0.25;
+}
+
+.callmap__arrow {
+  fill: var(--evidence-static);
+}
+
+.callmap__arrow.is-inferred {
+  fill: var(--evidence-inferred);
+}
+
+.callmap__arrow.is-external,
+.callmap__arrow.is-unresolved {
+  fill: var(--color-text-faint);
+}
+
+.callmap__count {
+  fill: var(--color-text-muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-anchor: middle;
+}
+
+.callmap__details {
+  flex: none;
+  max-height: 45%;
+  overflow: auto;
+  padding: var(--space-2) var(--space-3);
+  border-top: 1px solid var(--color-border);
+  background: var(--color-surface);
+  font-size: var(--text-sm);
+}
+
+.callmap__details header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+  font-family: var(--font-mono);
+}
+
+.callmap__columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--space-3);
+}
+
+.callmap__columns h4 {
+  margin: 0 0 var(--space-1);
+  color: var(--color-text-faint);
+  font-family: var(--font-ui);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.callmap__columns ul {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.callmap__site {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 var(--space-2);
+}
+
+.callmap__site code {
+  font-size: 12px;
+}
+
+.callmap__link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--color-accent);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  text-decoration: underline dotted;
+}
+
+.callmap__muted {
+  color: var(--color-text-faint);
+  font-size: var(--text-xs);
+}

@@ -52,12 +52,12 @@ export function AppHeader({ theme, onThemeChange, center, controls }: AppHeaderP
 }
 
 export function BrandMark({ size = 28 }: { size?: number }) {
+  // Terminal-prompt mark: ">_" on an editor tile, with the lab's value colour as the cursor.
   return (
     <svg width={size} height={size} viewBox="0 0 64 64" aria-hidden="true" className="brand-mark">
-      <rect width="64" height="64" rx="16" fill="var(--hue-violet)" />
-      <rect x="12" y="18" width="18" height="28" rx="5" fill="var(--hue-sun)" />
-      <circle cx="44" cy="24" r="8" fill="var(--hue-mint)" />
-      <path d="M36 44h16" stroke="#fff" strokeWidth="5" strokeLinecap="round" />
+      <rect width="64" height="64" rx="12" fill="var(--code-bg)" stroke="var(--color-border-strong)" strokeWidth="2" />
+      <path d="M16 22l12 10-12 10" fill="none" stroke="var(--color-accent)" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round" />
+      <rect x="32" y="40" width="18" height="6" rx="3" fill="var(--lab-value)" />
     </svg>
   );
 }

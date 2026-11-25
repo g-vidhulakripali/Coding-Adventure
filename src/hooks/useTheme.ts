@@ -10,7 +10,7 @@ const isTheme = (v: unknown): v is ThemePreference => v === 'system' || v === 'l
  * that case, so we only set `data-theme` for an explicit choice.
  */
 export function useTheme(): [ThemePreference, (next: ThemePreference) => void] {
-  const [theme, setTheme] = usePreference<ThemePreference>('theme', 'system', isTheme);
+  const [theme, setTheme] = usePreference<ThemePreference>('theme', 'dark', isTheme);
 
   useEffect(() => {
     const root = document.documentElement;

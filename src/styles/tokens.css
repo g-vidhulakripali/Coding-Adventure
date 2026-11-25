@@ -5,8 +5,9 @@
  * Components reference tokens only — never raw colours — so light/dark themes
  * and reduced motion work everywhere automatically.
  *
- * Palette idea: a bright "playground" set of six hues, each owning one role in
- * the visual laboratory, on calm neutral surfaces so code stays readable.
+ * Coder theme: IDE-style surfaces, a terminal-green accent, monospace UI
+ * chrome, and six bright hues that each own one role in the visual lab.
+ * Dark is the default; light is a "paper terminal" variant.
  */
 
 :root {
@@ -20,19 +21,19 @@
   --hue-teal: #12a5a5;
 
   /* ---- Surfaces & text (light) ---------------------------------------- */
-  --color-bg: #f5f3fd;
+  --color-bg: #f4f6f8;
   --color-surface: #ffffff;
-  --color-surface-2: #f0edfb;
-  --color-surface-3: #e6e1f8;
-  --color-border: #e0dbf3;
-  --color-border-strong: #c9c1ea;
-  --color-text: #1d1a2e;
-  --color-text-muted: #625e7c;
-  --color-text-faint: #8e89aa;
-  --color-accent: var(--hue-violet);
-  --color-accent-soft: #ece6ff;
+  --color-surface-2: #eef1f5;
+  --color-surface-3: #e3e8ee;
+  --color-border: #dde3ea;
+  --color-border-strong: #c3ccd7;
+  --color-text: #17202b;
+  --color-text-muted: #556274;
+  --color-text-faint: #8592a3;
+  --color-accent: #0b8f5f;
+  --color-accent-soft: #dcf3e8;
   --color-accent-contrast: #ffffff;
-  --color-focus: #6d4aff;
+  --color-focus: #0b8f5f;
   --color-danger: #c62f55;
   --color-warning-bg: #fff4d6;
   --color-warning-text: #7a5600;
@@ -45,6 +46,10 @@
   --lab-decision: var(--hue-tangerine);
   --lab-loop: var(--hue-mint);
   --lab-return: var(--hue-coral);
+  --lab-stage-bg: linear-gradient(180deg, #eef3f9 0%, #e1e9f3 100%);
+  --lab-bench: #ffffff;
+  --lab-bench-edge: #9fb1c7;
+  --lab-glass-opacity: 0.3;
 
   /* ---- Evidence levels ------------------------------------------------- */
   --evidence-verified: #138a5e;
@@ -65,11 +70,11 @@
   --cat-other: #9a96ad;
 
   /* ---- Code viewer ----------------------------------------------------- */
-  --code-bg: #fdfcff;
-  --code-gutter-bg: #f6f4fd;
-  --code-gutter-text: #a7a2c2;
-  --code-active-line: #f3f0ff;
-  --code-selection: #d9d0ff;
+  --code-bg: #fbfcfd;
+  --code-gutter-bg: #f4f6f8;
+  --code-gutter-text: #a3aebb;
+  --code-active-line: #eef2f6;
+  --code-selection: #cfe3ff;
   --code-highlight-line: #fff1c2;
   --code-highlight-edge: var(--hue-sun);
   --code-highlight-mark: #ffd96b;
@@ -88,6 +93,8 @@
   /* ---- Typography ------------------------------------------------------ */
   --font-sans: 'Inter', 'Segoe UI', system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif;
   --font-mono: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', ui-monospace, 'SFMono-Regular', Consolas, monospace;
+  /* UI chrome (titles, buttons, labels) uses the mono face; long prose stays sans for readability. */
+  --font-ui: var(--font-mono);
   --text-xs: 0.75rem;
   --text-sm: 0.8125rem;
   --text-md: 0.875rem;
@@ -107,13 +114,14 @@
   --space-5: 24px;
   --space-6: 32px;
   --space-7: 48px;
-  --radius-sm: 6px;
-  --radius-md: 10px;
-  --radius-lg: 16px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
   --radius-pill: 999px;
-  --shadow-sm: 0 1px 2px rgb(40 26 110 / 0.06);
-  --shadow-md: 0 4px 16px rgb(40 26 110 / 0.08), 0 1px 3px rgb(40 26 110 / 0.06);
-  --shadow-lg: 0 16px 40px rgb(40 26 110 / 0.14);
+  --shadow-sm: 0 1px 2px rgb(15 23 42 / 0.06);
+  --shadow-md: 0 4px 16px rgb(15 23 42 / 0.08), 0 1px 3px rgb(15 23 42 / 0.06);
+  --shadow-lg: 0 16px 40px rgb(15 23 42 / 0.14);
+  --glow-accent: none;
 
   /* ---- Layout ---------------------------------------------------------- */
   --header-height: 52px;
@@ -130,142 +138,153 @@
   color-scheme: light;
 }
 
-/* ---- Dark theme: follows the OS unless the user picked light ----------- */
+/* ---- Dark (default) theme: one palette, applied for an explicit choice or the OS setting ---- */
+/* Generated from a single palette; keep both blocks identical. */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']) {
-    --color-bg: #11101a;
-    --color-surface: #1a1925;
-    --color-surface-2: #222031;
-    --color-surface-3: #2c2a3f;
-    --color-border: #2e2c42;
-    --color-border-strong: #45425f;
-    --color-text: #ece9ff;
-    --color-text-muted: #a8a4c6;
-    --color-text-faint: #7b7798;
-    --color-accent: #9a80ff;
-    --color-accent-soft: #2e2752;
-    --color-accent-contrast: #12101c;
-    --color-focus: #a891ff;
-    --color-danger: #ff7a9a;
-    --color-warning-bg: #3a2f10;
-    --color-warning-text: #ffd36b;
+    --color-bg: #0a0d12;
+    --color-surface: #10141b;
+    --color-surface-2: #151a23;
+    --color-surface-3: #1c2330;
+    --color-border: #222a37;
+    --color-border-strong: #334055;
+    --color-text: #d8dee9;
+    --color-text-muted: #8d97ab;
+    --color-text-faint: #5c667a;
+    --color-accent: #3ddc97;
+    --color-accent-soft: #10291f;
+    --color-accent-contrast: #04140c;
+    --color-focus: #3ddc97;
+    --color-danger: #ff6b81;
+    --color-warning-bg: #2b2310;
+    --color-warning-text: #ffd166;
 
-    --lab-variable: #4fb3ec;
-    --lab-value: #ffcf3f;
-    --lab-collection: #3fd0d0;
-    --lab-function: #9a80ff;
-    --lab-decision: #ff9f4d;
-    --lab-loop: #3fe0b0;
-    --lab-return: #ff7a9a;
+    --lab-variable: #4fb3ff;
+    --lab-value: #ffd166;
+    --lab-collection: #2ee6d6;
+    --lab-function: #b388ff;
+    --lab-decision: #ff9f43;
+    --lab-loop: #3ddc97;
+    --lab-return: #ff6b81;
+    --lab-stage-bg: radial-gradient(ellipse at 50% 0%, rgb(61 220 151 / 0.07), transparent 60%), #0c1016;
+    --lab-bench: #151a23;
+    --lab-bench-edge: #334055;
+    --lab-glass-opacity: 0.16;
 
-    --evidence-verified: #4cd39b;
-    --evidence-static: #6aa8ff;
-    --evidence-inferred: #f0b44c;
-    --evidence-simulated: #b39dff;
-    --evidence-unsupported: #9c98b5;
+    --evidence-verified: #3ddc97;
+    --evidence-static: #4fb3ff;
+    --evidence-inferred: #ffb84d;
+    --evidence-simulated: #b388ff;
+    --evidence-unsupported: #7c869a;
 
-    --cat-python: #6aa3db;
-    --cat-notebook: #ff9a4d;
-    --cat-image: #ec6fb8;
-    --cat-data: #3fc9b8;
-    --cat-config: #e6b440;
-    --cat-doc: #a8a4c6;
+    --cat-python: #6cb6ff;
+    --cat-notebook: #ff9f43;
+    --cat-image: #ff7ac6;
+    --cat-data: #2ee6d6;
+    --cat-config: #ffcb6b;
+    --cat-doc: #8d97ab;
     --cat-web: #ff7d6e;
-    --cat-deps: #b195ff;
-    --cat-other: #7b7798;
+    --cat-deps: #b388ff;
+    --cat-other: #5c667a;
 
-    --code-bg: #15141f;
-    --code-gutter-bg: #181724;
-    --code-gutter-text: #57536f;
-    --code-active-line: #1f1d2e;
-    --code-selection: #3d3470;
-    --code-highlight-line: #3a3014;
-    --code-highlight-edge: #ffcf3f;
-    --code-highlight-mark: #6b5514;
+    --code-bg: #0c1016;
+    --code-gutter-bg: #0c1016;
+    --code-gutter-text: #3d4657;
+    --code-active-line: #121822;
+    --code-selection: #24324a;
+    --code-highlight-line: #2a2410;
+    --code-highlight-edge: #ffd166;
+    --code-highlight-mark: #5a4a14;
 
-    --syn-keyword: #d19bff;
-    --syn-def: #7cb6ff;
-    --syn-string: #7ee0a8;
-    --syn-number: #ffab70;
-    --syn-comment: #6f6b8c;
-    --syn-builtin: #5fd4e8;
-    --syn-operator: #a8a4c6;
-    --syn-decorator: #ffb36b;
-    --syn-property: #d6d2f0;
-    --syn-invalid: #ff7a9a;
+    --syn-keyword: #c49bff;
+    --syn-def: #6cb6ff;
+    --syn-string: #9be27a;
+    --syn-number: #ffab6b;
+    --syn-comment: #5f6b80;
+    --syn-builtin: #4fe0d0;
+    --syn-operator: #8d97ab;
+    --syn-decorator: #ffcb6b;
+    --syn-property: #d8dee9;
+    --syn-invalid: #ff6b81;
 
-    --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.4);
-    --shadow-md: 0 4px 16px rgb(0 0 0 / 0.35), 0 1px 3px rgb(0 0 0 / 0.3);
-    --shadow-lg: 0 16px 40px rgb(0 0 0 / 0.5);
+    --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.5);
+    --shadow-md: 0 4px 16px rgb(0 0 0 / 0.45), 0 1px 3px rgb(0 0 0 / 0.4);
+    --shadow-lg: 0 16px 40px rgb(0 0 0 / 0.6);
+    --glow-accent: 0 0 0 1px rgb(61 220 151 / 0.25), 0 0 24px rgb(61 220 151 / 0.12);
     color-scheme: dark;
   }
 }
 
 :root[data-theme='dark'] {
-  --color-bg: #11101a;
-  --color-surface: #1a1925;
-  --color-surface-2: #222031;
-  --color-surface-3: #2c2a3f;
-  --color-border: #2e2c42;
-  --color-border-strong: #45425f;
-  --color-text: #ece9ff;
-  --color-text-muted: #a8a4c6;
-  --color-text-faint: #7b7798;
-  --color-accent: #9a80ff;
-  --color-accent-soft: #2e2752;
-  --color-accent-contrast: #12101c;
-  --color-focus: #a891ff;
-  --color-danger: #ff7a9a;
-  --color-warning-bg: #3a2f10;
-  --color-warning-text: #ffd36b;
+  --color-bg: #0a0d12;
+  --color-surface: #10141b;
+  --color-surface-2: #151a23;
+  --color-surface-3: #1c2330;
+  --color-border: #222a37;
+  --color-border-strong: #334055;
+  --color-text: #d8dee9;
+  --color-text-muted: #8d97ab;
+  --color-text-faint: #5c667a;
+  --color-accent: #3ddc97;
+  --color-accent-soft: #10291f;
+  --color-accent-contrast: #04140c;
+  --color-focus: #3ddc97;
+  --color-danger: #ff6b81;
+  --color-warning-bg: #2b2310;
+  --color-warning-text: #ffd166;
 
-  --lab-variable: #4fb3ec;
-  --lab-value: #ffcf3f;
-  --lab-collection: #3fd0d0;
-  --lab-function: #9a80ff;
-  --lab-decision: #ff9f4d;
-  --lab-loop: #3fe0b0;
-  --lab-return: #ff7a9a;
+  --lab-variable: #4fb3ff;
+  --lab-value: #ffd166;
+  --lab-collection: #2ee6d6;
+  --lab-function: #b388ff;
+  --lab-decision: #ff9f43;
+  --lab-loop: #3ddc97;
+  --lab-return: #ff6b81;
+  --lab-stage-bg: radial-gradient(ellipse at 50% 0%, rgb(61 220 151 / 0.07), transparent 60%), #0c1016;
+  --lab-bench: #151a23;
+  --lab-bench-edge: #334055;
+  --lab-glass-opacity: 0.16;
 
-  --evidence-verified: #4cd39b;
-  --evidence-static: #6aa8ff;
-  --evidence-inferred: #f0b44c;
-  --evidence-simulated: #b39dff;
-  --evidence-unsupported: #9c98b5;
+  --evidence-verified: #3ddc97;
+  --evidence-static: #4fb3ff;
+  --evidence-inferred: #ffb84d;
+  --evidence-simulated: #b388ff;
+  --evidence-unsupported: #7c869a;
 
-  --cat-python: #6aa3db;
-  --cat-notebook: #ff9a4d;
-  --cat-image: #ec6fb8;
-  --cat-data: #3fc9b8;
-  --cat-config: #e6b440;
-  --cat-doc: #a8a4c6;
+  --cat-python: #6cb6ff;
+  --cat-notebook: #ff9f43;
+  --cat-image: #ff7ac6;
+  --cat-data: #2ee6d6;
+  --cat-config: #ffcb6b;
+  --cat-doc: #8d97ab;
   --cat-web: #ff7d6e;
-  --cat-deps: #b195ff;
-  --cat-other: #7b7798;
+  --cat-deps: #b388ff;
+  --cat-other: #5c667a;
 
-  --code-bg: #15141f;
-  --code-gutter-bg: #181724;
-  --code-gutter-text: #57536f;
-  --code-active-line: #1f1d2e;
-  --code-selection: #3d3470;
-  --code-highlight-line: #3a3014;
-  --code-highlight-edge: #ffcf3f;
-  --code-highlight-mark: #6b5514;
+  --code-bg: #0c1016;
+  --code-gutter-bg: #0c1016;
+  --code-gutter-text: #3d4657;
+  --code-active-line: #121822;
+  --code-selection: #24324a;
+  --code-highlight-line: #2a2410;
+  --code-highlight-edge: #ffd166;
+  --code-highlight-mark: #5a4a14;
 
-  --syn-keyword: #d19bff;
-  --syn-def: #7cb6ff;
-  --syn-string: #7ee0a8;
-  --syn-number: #ffab70;
-  --syn-comment: #6f6b8c;
-  --syn-builtin: #5fd4e8;
-  --syn-operator: #a8a4c6;
-  --syn-decorator: #ffb36b;
-  --syn-property: #d6d2f0;
-  --syn-invalid: #ff7a9a;
+  --syn-keyword: #c49bff;
+  --syn-def: #6cb6ff;
+  --syn-string: #9be27a;
+  --syn-number: #ffab6b;
+  --syn-comment: #5f6b80;
+  --syn-builtin: #4fe0d0;
+  --syn-operator: #8d97ab;
+  --syn-decorator: #ffcb6b;
+  --syn-property: #d8dee9;
+  --syn-invalid: #ff6b81;
 
-  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.4);
-  --shadow-md: 0 4px 16px rgb(0 0 0 / 0.35), 0 1px 3px rgb(0 0 0 / 0.3);
-  --shadow-lg: 0 16px 40px rgb(0 0 0 / 0.5);
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.5);
+  --shadow-md: 0 4px 16px rgb(0 0 0 / 0.45), 0 1px 3px rgb(0 0 0 / 0.4);
+  --shadow-lg: 0 16px 40px rgb(0 0 0 / 0.6);
+  --glow-accent: 0 0 0 1px rgb(61 220 151 / 0.25), 0 0 24px rgb(61 220 151 / 0.12);
   color-scheme: dark;
 }
 

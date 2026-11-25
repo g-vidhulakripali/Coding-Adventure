@@ -9,6 +9,8 @@ export default defineConfig({
   build: {
     target: 'es2022',
     sourcemap: true,
+    // The 3D laboratory chunk (Three.js, ~150 KB gzipped) is lazy-loaded only when the 3D view opens.
+    chunkSizeWarningLimit: 650,
   },
   test: {
     environment: 'jsdom',

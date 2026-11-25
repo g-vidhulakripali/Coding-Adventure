@@ -15,6 +15,8 @@ import {
 } from '../../components/layout/layoutModes';
 import { ResizableRow, type RowPanel } from '../../components/layout/ResizableRow';
 import { VisualLabPanel } from '../../components/visual-lab/VisualLabPanel';
+import { useSimulationController } from '../../components/visual-lab/useSimulationController';
+import type { ViewerHighlight } from '../../components/code-editor/codemirrorSetup';
 import { extractPythonOutline, type FileOutline, type OutlineSymbol } from '../../core/parser/outline';
 import { defaultFileFor, loadProject } from '../../core/project/registry';
 import { isTextCategory } from '../../core/repository/fileTypes';
@@ -110,6 +112,29 @@ export function WorkspaceRoute({ projectId, filePath, lines, theme, onThemeChang
   );
   const lineCount = content.status === 'ready' ? countLines(content.text) : null;
 
+  // ---- Python sources for simulation and the call map ----------------------
+  const [sources, setSources] = useState<Map<string, string> | null>(null);
+  // CSV files the code may read with pd.read_csv (data only; nothing is executed).
+  const [dataFiles, setDataFiles] = useState<Map<string, string> | null>(null);
+  useEffect(() => {
+    if (!project) return;
+    let cancelled = false;
+    const read = (category: string) =>
+      Promise.all(project.files.filter((f) => f.category === category).map((f) => project.readText(f.path).then((text) => [f.path, text] as const)));
+    Promise.all([read('python'), read('csv')]).then(
+      ([py, csv]) => {
+        if (cancelled) return;
+        setSources(new Map(py));
+        setDataFiles(new Map(csv));
+      },
+      () => !cancelled && setSources(new Map()),
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [project]);
+  const sim = useSimulationController(sources, dataFiles, filePath);
+
   // ---- Navigation helpers ------------------------------------------------
   const go = useCallback(
     (path: string | null, range: LineRange | null, replace = false) =>
@@ -131,7 +156,29 @@ export function WorkspaceRoute({ projectId, filePath, lines, theme, onThemeChang
     [go, filePath, compact],
   );
   const selectLine = useCallback((line: number) => go(filePath, { startLine: line, endLine: line }, true), [go, filePath]);
-  const clearHighlight = useCallback(() => go(filePath, null, true), [go, filePath]);
+  // ---- Source highlight: user selection (route) or the simulation step ----
+  // The simulation takes over the highlight only after the user steps through it,
+  // and follows execution into other files.
+  const [highlightMode, setHighlightMode] = useState<'route' | 'sim'>('route');
+  useEffect(() => {
+    if (sim.navigationSerial === 0 || !sim.step) return;
+    setHighlightMode('sim');
+    if (sim.step.span.path !== filePath) go(sim.step.span.path, null, true);
+  }, [sim.navigationSerial]);
+  const linesKey = lines ? `${lines.startLine}-${lines.endLine}` : '';
+  useEffect(() => {
+    if (lines) setHighlightMode('route');
+  }, [linesKey]);
+  const simSpan = highlightMode === 'sim' && sim.step && sim.step.span.path === filePath ? sim.step.span : null;
+  const codeHighlight: ViewerHighlight | null = simSpan
+    ? { startLine: simSpan.startLine, endLine: simSpan.endLine, startColumn: simSpan.startColumn, endColumn: simSpan.endColumn }
+    : highlightMode === 'route'
+      ? lines
+      : null;
+  const clearHighlight = useCallback(() => {
+    setHighlightMode('route');
+    go(filePath, null, true);
+  }, [go, filePath]);
 
   // ---- Keyboard shortcuts: Alt+1..4 switch layout ------------------------
   useEffect(() => {
@@ -223,13 +270,23 @@ export function WorkspaceRoute({ projectId, filePath, lines, theme, onThemeChang
       onSelectSymbol={selectSymbol}
     />
   );
-  const code = <CodePanel file={file} content={content} highlight={lines} onLineClick={selectLine} onClearHighlight={clearHighlight} />;
-  const lab = <VisualLabPanel filePath={file?.path ?? null} />;
+  const code = <CodePanel file={file} content={content} highlight={codeHighlight} onLineClick={selectLine} onClearHighlight={clearHighlight} />;
+  const lab = (
+    <VisualLabPanel
+      sim={sim}
+      currentFile={filePath}
+      onNavigate={(path, range) => {
+        go(path, range);
+        if (compact) setCompactPanel('code');
+      }}
+    />
+  );
   const explanation = (
     <ExplanationPanel
       file={file}
       lineCount={lineCount}
       outline={outline}
+      sim={sim}
       onCollapse={compact ? undefined : () => setExplainCollapsed(true)}
     />
   );
