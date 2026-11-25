@@ -60,13 +60,14 @@ const PY_BUILTINS = new Set([
   'RuntimeError', 'NotImplementedError', 'AttributeError', 'StopIteration', 'OSError', 'FileNotFoundError',
 ]);
 
-type Binding =
+export type Binding =
   | { kind: 'project-module'; path: string }
   /** `from module import symbol`; `submodule` is set when `module/symbol.py` also exists. */
   | { kind: 'project-symbol'; path: string; symbol: string; submodule: string | null }
   | { kind: 'library'; module: string; symbol: string | null };
 
-interface RawCall {
+/** A call as written, before it is resolved against other files. */
+export interface RawCall {
   callerId: string;
   callee: string;
   span: SourceSpan;
@@ -76,6 +77,29 @@ interface RawCall {
   attr: string | null;
   className: string | null;
   path: string;
+}
+
+/** One imported name, as written. */
+export interface ImportFact {
+  /** Name this file uses, e.g. `np`. */
+  readonly local: string;
+  /** Dotted module; null for `from . import x`. */
+  readonly module: string | null;
+  /** Number of leading dots. */
+  readonly level: number;
+  /** For `from module import name`; null for `import module`. */
+  readonly name: string | null;
+  readonly hasAlias: boolean;
+  readonly line: number;
+}
+
+/** What one file contributes to the call index. Plain data, independent of other files, so it can be stored. */
+export interface FileCalls {
+  readonly path: string;
+  readonly definitions: readonly Definition[];
+  readonly calls: readonly RawCall[];
+  readonly imports: readonly ImportFact[];
+  readonly hasSyntaxErrors: boolean;
 }
 
 interface FileInfo {
@@ -88,22 +112,14 @@ interface FileInfo {
 }
 
 export function buildCallIndex(sources: ReadonlyMap<string, string>): CallIndex {
-  const steps = callIndexSteps(sources);
-  for (;;) {
-    const r = steps.next();
-    if (r.done) return r.value;
-  }
+  return linkCalls([...sources].map(([path, source]) => extractCalls(path, source)));
 }
 
-/** Same as `buildCallIndex`, pausing after every file so a large project does not freeze the page. */
-export function* callIndexSteps(sources: ReadonlyMap<string, string>): Generator<void, CallIndex> {
-  const definitions: Definition[] = [];
-  const raw: RawCall[] = [];
-  const files = new Map<string, FileInfo>();
-  const filesWithSyntaxErrors: string[] = [];
-
-  for (const [path, source] of sources) {
-    yield;
+/** Reads the definitions, calls and imports of one file. */
+export function extractCalls(path: string, source: string): FileCalls {
+    const definitions: Definition[] = [];
+    const raw: RawCall[] = [];
+    const imports: ImportFact[] = [];
     const tree = pythonLanguage.parser.parse(source);
     const lineStarts = computeLineStarts(source);
     const text = (n: { from: number; to: number }) => source.slice(n.from, n.to);
@@ -118,10 +134,6 @@ export function* callIndexSteps(sources: ReadonlyMap<string, string>): Generator
         if (n.type.isError) hasError = true;
       },
     });
-    if (hasError) filesWithSyntaxErrors.push(path);
-
-    const info: FileInfo = { path, bindings: new Map(), topLevel: new Map(), methods: new Map() };
-    files.set(path, info);
     const moduleId = `${path}::<module>`;
     const firstLineEnd = source.indexOf('\n') >= 0 ? source.indexOf('\n') : source.length;
     definitions.push({ id: moduleId, kind: 'module', name: path.split('/').pop()!, qualname: '<module>', path, span: spanOf(0, firstLineEnd) });
@@ -139,11 +151,6 @@ export function* callIndexSteps(sources: ReadonlyMap<string, string>): Generator
           const headerEnd = body ? body.from : child.to;
           const kind: DefinitionKind = isClass ? 'class' : scope.className && scope.depth === 1 ? 'method' : 'function';
           definitions.push({ id, kind, name, qualname, path, span: spanOf(child.from, headerEnd) });
-          if (scope.depth === 0) info.topLevel.set(name, id);
-          if (kind === 'method' && scope.className) {
-            if (!info.methods.has(scope.className)) info.methods.set(scope.className, new Map());
-            info.methods.get(scope.className)!.set(name, id);
-          }
           // Decorators and default values run in the enclosing scope; the body runs in the new one.
           for (let c = child.firstChild; c; c = c.nextSibling) {
             // Method bodies keep their class so `self.x()` can be resolved.
@@ -153,7 +160,7 @@ export function* callIndexSteps(sources: ReadonlyMap<string, string>): Generator
           continue;
         }
         if (child.name === 'ImportStatement') {
-          recordImport(child, info, text, path, sources);
+          recordImport(child, imports, text, spanOf(child.from, child.to).startLine);
           continue;
         }
         if (child.name === 'CallExpression') {
@@ -176,8 +183,31 @@ export function* callIndexSteps(sources: ReadonlyMap<string, string>): Generator
       }
     };
     walk(tree.topNode, { id: moduleId, qualname: null, className: null, depth: 0 });
-  }
+    return { path, definitions, calls: raw, imports, hasSyntaxErrors: hasError };
+}
 
+/** Resolves every call against the definitions and imports of all files. */
+export function linkCalls(all: readonly FileCalls[]): CallIndex {
+  const paths = new Set(all.map((f) => f.path));
+  const has = { has: (p: string) => paths.has(p) };
+  const files = new Map<string, FileInfo>();
+  for (const f of all) {
+    const info: FileInfo = { path: f.path, bindings: new Map(), topLevel: new Map(), methods: new Map() };
+    files.set(f.path, info);
+    for (const d of f.definitions) {
+      if (d.kind === 'module') continue;
+      const parts = d.qualname.split('.');
+      if (parts.length === 1) info.topLevel.set(d.name, d.id);
+      if (d.kind === 'method' && parts.length === 2) {
+        if (!info.methods.has(parts[0]!)) info.methods.set(parts[0]!, new Map());
+        info.methods.get(parts[0]!)!.set(d.name, d.id);
+      }
+    }
+    for (const i of f.imports) info.bindings.set(i.local, bindingOf(i, f.path, has));
+  }
+  const definitions = all.flatMap((f) => f.definitions);
+  const raw = all.flatMap((f) => f.calls);
+  const filesWithSyntaxErrors = all.filter((f) => f.hasSyntaxErrors).map((f) => f.path);
   const calls: CallSite[] = raw.map((c, i) => ({
     id: `call-${i}`,
     callerId: c.callerId,
@@ -188,7 +218,7 @@ export function* callIndexSteps(sources: ReadonlyMap<string, string>): Generator
   return { definitions, calls, filesWithSyntaxErrors };
 }
 
-function recordImport(node: SyntaxNode, info: FileInfo, text: (n: SyntaxNode) => string, path: string, sources: ReadonlyMap<string, string>) {
+function recordImport(node: SyntaxNode, out: ImportFact[], text: (n: SyntaxNode) => string, line: number) {
   const kids: SyntaxNode[] = [];
   for (let c = node.firstChild; c; c = c.nextSibling) if (c.name !== 'Comment') kids.push(c);
   const groups = (list: SyntaxNode[]) => {
@@ -206,24 +236,14 @@ function recordImport(node: SyntaxNode, info: FileInfo, text: (n: SyntaxNode) =>
     const parts: string[] = [];
     for (const k of kids.slice(1, importIdx)) {
       if (k.name === '.' && parts.length === 0) level++;
+      else if (k.name === '...' && parts.length === 0) level += 3;
       else if (k.name === 'VariableName') parts.push(text(k));
     }
-    const moduleName = parts.join('.');
-    const modulePath = resolveModulePath(moduleName || null, level, path, sources);
     for (const g of groups(kids.slice(importIdx + 1))) {
       const asIdx = g.findIndex((k) => k.name === 'as');
       const name = dottedName(asIdx >= 0 ? g.slice(0, asIdx) : g);
       if (!name || name === '*') continue;
-      const local = asIdx >= 0 && g[asIdx + 1] ? text(g[asIdx + 1]!) : name;
-      if (modulePath) {
-        const sub = modulePath.endsWith('__init__.py') ? resolveModulePath(name, 1, modulePath, sources) : null;
-        info.bindings.set(local, { kind: 'project-symbol', path: modulePath, symbol: name, submodule: sub });
-      } else if (resolveModulePath([moduleName, name].filter(Boolean).join('.'), level, path, sources)) {
-        // A package without `__init__.py`: the name is a file inside the folder.
-        info.bindings.set(local, { kind: 'project-module', path: resolveModulePath([moduleName, name].filter(Boolean).join('.'), level, path, sources)! });
-      } else {
-        info.bindings.set(local, { kind: 'library', module: `${'.'.repeat(level)}${moduleName}`, symbol: name });
-      }
+      out.push({ local: asIdx >= 0 && g[asIdx + 1] ? text(g[asIdx + 1]!) : name, module: parts.join('.') || null, level, name, hasAlias: asIdx >= 0, line });
     }
     return;
   }
@@ -231,13 +251,29 @@ function recordImport(node: SyntaxNode, info: FileInfo, text: (n: SyntaxNode) =>
     const asIdx = g.findIndex((k) => k.name === 'as');
     const name = dottedName(asIdx >= 0 ? g.slice(0, asIdx) : g);
     if (!name) continue;
-    const local = asIdx >= 0 && g[asIdx + 1] ? text(g[asIdx + 1]!) : name.split('.')[0]!;
-    const modulePath = resolveModulePath(name, 0, path, sources);
-    info.bindings.set(local, modulePath ? { kind: 'project-module', path: modulePath } : { kind: 'library', module: asIdx >= 0 ? name : local, symbol: null });
+    out.push({ local: asIdx >= 0 && g[asIdx + 1] ? text(g[asIdx + 1]!) : name.split('.')[0]!, module: name, level: 0, name: null, hasAlias: asIdx >= 0, line });
   }
 }
 
-export function resolveModulePath(name: string | null, level: number, fromPath: string, sources: ReadonlyMap<string, string>): string | null {
+/** What an imported name refers to: a project file, a name in a project file, or a library. */
+export function bindingOf(i: ImportFact, from: string, files: { has(path: string): boolean }): Binding {
+  if (i.name === null) {
+    const path = resolveModulePath(i.module, 0, from, files);
+    if (path) return { kind: 'project-module', path };
+    return { kind: 'library', module: i.hasAlias ? i.module! : i.local, symbol: null };
+  }
+  const modulePath = resolveModulePath(i.module, i.level, from, files);
+  if (modulePath) {
+    const submodule = modulePath.endsWith('__init__.py') ? resolveModulePath(i.name, 1, modulePath, files) : null;
+    return { kind: 'project-symbol', path: modulePath, symbol: i.name, submodule };
+  }
+  // A package without `__init__.py`: the name is a file inside the folder.
+  const inside = resolveModulePath([i.module, i.name].filter(Boolean).join('.'), i.level, from, files);
+  if (inside) return { kind: 'project-module', path: inside };
+  return { kind: 'library', module: `${'.'.repeat(i.level)}${i.module ?? ''}`, symbol: i.name };
+}
+
+export function resolveModulePath(name: string | null, level: number, fromPath: string, sources: { has(path: string): boolean }): string | null {
   const dirname = (p: string) => (p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : '');
   const parts = name ? name.split('.') : [];
   const bases: string[] = [];

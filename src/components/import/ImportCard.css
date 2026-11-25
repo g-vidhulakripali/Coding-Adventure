@@ -90,3 +90,27 @@
   border-color: var(--color-danger);
   color: var(--color-danger);
 }
+
+.storage-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+}
+
+.storage-line meter {
+  width: 90px;
+}
+
+.saved-list__tools {
+  display: flex;
+  flex-direction: column;
+}
+
+.saved-list__open.is-unfinished {
+  border-style: dashed;
+  border-color: var(--evidence-inferred);
+}

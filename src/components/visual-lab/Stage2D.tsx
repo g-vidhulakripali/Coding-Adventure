@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useRef, type ReactNode } from 'react';
+import { useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { Trace } from '../../core/simulation/trace';
 import { buildLineView, type LineNode } from '../../core/visualisation/lines';
 import type { Scene, SceneValue } from '../../core/visualisation/scene';
@@ -13,6 +13,7 @@ export interface Stage2DProps {
   readonly durationMs?: number;
   /** Switches the assumed answer of a decision that is not known. */
   readonly onChoose?: (key: string, taken: boolean) => void;
+  readonly onJump?: (step: number) => void;
 }
 
 /**
@@ -22,7 +23,9 @@ export interface Stage2DProps {
  * containers. A call opens the called function's container; the caller waits
  * above as a one-line card.
  */
-export function Stage2D({ scene, trace, stepIndex, sources, durationMs = 0, onChoose }: Stage2DProps) {
+export function Stage2D({ scene, trace, stepIndex, sources, durationMs = 0, onChoose, onJump }: Stage2DProps) {
+  // Chapters opened by hand, for the function shown now.
+  const [opened, setOpened] = useState<ReadonlySet<string>>(new Set());
   const assumption = trace.steps[stepIndex]?.assumption ?? null;
   const chooser =
     assumption && onChoose ? (
@@ -169,9 +172,49 @@ export function Stage2D({ scene, trace, stepIndex, sources, durationMs = 0, onCh
           ) : null}
           {view.nodes.length > 0 ? (
             <ol className="lines2d__list">
-              {view.nodes.map((n, i) => (
-                <LineRow key={i} node={n} scene={scene} extra={chooser} />
-              ))}
+              {view.chapters.length === 0
+                ? view.nodes.map((n, i) => <LineRow key={i} node={n} scene={scene} extra={chooser} />)
+                : view.chapters.map((c, i) => {
+                    const key = `${view.frame.path}:${c.startLine}`;
+                    const isOpen = c.status === 'current' || opened.has(key) || (i === 0 && !view.chapters.some((x) => x.status === 'current'));
+                    return (
+                      <li key={key} className={`chapter is-${c.status}${isOpen ? ' is-open' : ''}`}>
+                        <div className="chapter__head">
+                          <button
+                            type="button"
+                            aria-expanded={isOpen}
+                            onClick={() =>
+                              setOpened((prev) => {
+                                const next = new Set(prev);
+                                if (next.has(key)) next.delete(key);
+                                else next.add(key);
+                                return next;
+                              })
+                            }
+                          >
+                            <span aria-hidden="true">{c.status === 'done' ? '✓' : c.status === 'current' ? '▶' : '○'}</span>
+                            <b>{i + 1}</b>
+                            <span className="chapter__title">{c.title ?? ''}</span>
+                            <small>
+                              {c.startLine}–{c.endLine}
+                            </small>
+                          </button>
+                          {c.step !== null && c.status !== 'current' && onJump ? (
+                            <button type="button" className="chapter__jump" onClick={() => onJump(c.step!)} title="Go to this part" aria-label={`Go to part ${i + 1}`}>
+                              ↦
+                            </button>
+                          ) : null}
+                        </div>
+                        {isOpen ? (
+                          <ol className="lines2d__list">
+                            {view.nodes.slice(c.first, c.last + 1).map((n, k) => (
+                              <LineRow key={k} node={n} scene={scene} extra={chooser} />
+                            ))}
+                          </ol>
+                        ) : null}
+                      </li>
+                    );
+                  })}
             </ol>
           ) : null}
         </section>

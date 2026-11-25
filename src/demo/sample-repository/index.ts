@@ -43,6 +43,11 @@ export const sampleProject: ProjectSource = {
   origin: 'demo',
   description: 'A small bundled Python repository: a discounted shopping total across two files and a pandas/NumPy indexing expression.',
   files,
+  async readBlob(path: string): Promise<Blob> {
+    const text = contents.get(path);
+    if (text === undefined) throw new Error(`File not found in project: ${path}`);
+    return new Blob([text]);
+  },
   async readText(path: string): Promise<string> {
     const file = files.find((f) => f.path === path);
     const text = contents.get(path);

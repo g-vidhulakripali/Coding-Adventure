@@ -10,7 +10,9 @@
     "preview": "vite preview",
     "typecheck": "tsc -b",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "e2e": "npm run build && playwright test",
+    "bench": "npm run build && playwright test --config playwright.bench.config.ts"
   },
   "engines": {
     "node": ">=20.19"
@@ -27,9 +29,11 @@
     "@lezer/highlight": "^1.2.5",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
-    "three": "^0.187.0"
+    "three": "^0.187.0",
+    "web-tree-sitter": "^0.25.10"
   },
   "devDependencies": {
+    "@playwright/test": "^1.60.0",
     "@testing-library/dom": "^10.4.2",
     "@testing-library/react": "^16.3.3",
     "@types/node": "^26.6.6",
@@ -38,6 +42,7 @@
     "@types/three": "^0.187.0",
     "@vitejs/plugin-react": "^6.3.0",
     "jsdom": "^29.1.1",
+    "tree-sitter-python": "^0.25.0",
     "typescript": "^7.0.2",
     "vite": "^8.3.8",
     "vitest": "^5.1.0"

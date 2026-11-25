@@ -62,6 +62,8 @@ export interface SimulationOptions {
   /** Which way to go at decisions that depend on `?`, keyed by `overrideKey` of the condition. */
   readonly choices?: ReadonlyMap<string, boolean>;
   readonly maxSteps?: number;
+  /** Stop after this much time (a run must not freeze the page). No limit when not given. */
+  readonly maxMs?: number;
   readonly maxDepth?: number;
   readonly maxIterations?: number;
 }
@@ -227,6 +229,7 @@ class Interpreter {
   /** Loops being walked once because their collection or condition is `?`: what they changed. */
   private readonly guesses: Array<{ refs: Set<number>; fields: Array<readonly [number, string]> }> = [];
   private quietOps = 0;
+  private ops = 0;
   /** Decisions and loops on `?` met so far (recorded or not). */
   private unknownTurns = 0;
   private readonly excParents = new Map<string, string>();
@@ -236,6 +239,7 @@ class Interpreter {
   private readCsvAssumption = false;
   private readonly overrides: ReadonlyMap<string, PyValue>;
   private readonly maxSteps: number;
+  private readonly deadline: number;
   private readonly maxDepth: number;
   private readonly maxIterations: number;
 
@@ -247,6 +251,7 @@ class Interpreter {
     this.overrides = options.overrides ?? new Map();
     this.choices = options.choices ?? new Map();
     this.maxSteps = options.maxSteps ?? 5000;
+    this.deadline = options.maxMs === undefined ? Infinity : performance.now() + options.maxMs;
     this.maxDepth = options.maxDepth ?? 40;
     this.maxIterations = options.maxIterations ?? 500;
   }
@@ -1339,6 +1344,7 @@ class Interpreter {
   }
 
   private eval(e: Expr, mod: ModuleState): Ev {
+    if ((++this.ops & 255) === 0 && performance.now() > this.deadline) throw new StopSignal('limit', 'Stopped: this run takes too long to show at once. Try one of the functions it calls.');
     if (this.quiet > 0 && ++this.quietOps > (this.loading > 0 ? MAX_QUIET_OPS : MAX_INLINE_OPS)) {
       if (this.loading > 0) throw new StopSignal('limit', 'Stopped: the setup code is too long to simulate.');
       throw new TooLong();

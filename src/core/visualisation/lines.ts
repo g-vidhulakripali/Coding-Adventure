@@ -1,4 +1,5 @@
 import { computeLineStarts, parsePythonModule, positionAt, type FunctionDef, type Module, type Span, type Stmt } from '../parser/python/ast';
+import { chaptersOf } from './chapters';
 import type { Step, Trace } from '../simulation/trace';
 import { displayValue, elementDisplay, elementsOf } from '../simulation/values';
 
@@ -28,6 +29,20 @@ export interface LineNode {
   readonly children: readonly LineNode[];
 }
 
+/** A group of neighbouring lines in a long function. */
+export interface LineChapter {
+  /** The author's comment above the group, or null. */
+  readonly title: string | null;
+  readonly startLine: number;
+  readonly endLine: number;
+  /** The group's nodes: `nodes[first]` to `nodes[last]`. */
+  readonly first: number;
+  readonly last: number;
+  readonly status: 'done' | 'current' | 'pending';
+  /** First step of this run inside the group, for jumping there. */
+  readonly step: number | null;
+}
+
 export interface LineView {
   readonly frame: {
     readonly kind: 'module' | 'function' | 'inputs';
@@ -40,6 +55,8 @@ export interface LineView {
   /** Frames waiting for this one to finish, outermost first, with the line that is waiting. */
   readonly callers: ReadonlyArray<{ readonly name: string; readonly path: string; readonly line: number; readonly code: string }>;
   readonly nodes: readonly LineNode[];
+  /** Empty for short code. Every node belongs to exactly one chapter. */
+  readonly chapters: readonly LineChapter[];
   /** True when the current step is entering this function (its values are arriving). */
   readonly headerCurrent: boolean;
 }
@@ -323,7 +340,22 @@ export function buildLineView(trace: Trace, index: number, sources: ReadonlyMap<
     return [{ name: f.kind === 'module' ? f.path : `${f.name.split('.').pop()}()`, path: f.path, line: waiting.span.startLine, code }];
   });
 
-  return { frame: frameInfo, callers, nodes, headerCurrent: now?.kind === 'enter' || (frameInfo.kind === 'inputs' && now !== null) };
+  const inChapter = (s: Step, from: number, to: number) => s.frameId === current.id && s.span.path === current.path && s.span.startLine >= from && s.span.startLine <= to;
+  const chapters = chaptersOf(nodes, file.lines).map((c): LineChapter => {
+    const has = nodes.slice(c.first, c.last + 1);
+    const step = trace.steps.find((s) => inChapter(s, c.startLine, c.endLine));
+    return {
+      title: c.title,
+      startLine: c.startLine,
+      endLine: c.endLine,
+      first: c.first,
+      last: c.last,
+      status: has.some((n) => n.status === 'current' || n.status === 'active') ? 'current' : has.some((n) => n.status === 'done') ? 'done' : 'pending',
+      step: step?.id ?? null,
+    };
+  });
+
+  return { frame: frameInfo, callers, nodes, chapters, headerCurrent: now?.kind === 'enter' || (frameInfo.kind === 'inputs' && now !== null) };
 }
 
 function skippedStatus(node: LineNode, skipped: boolean): LineStatus {

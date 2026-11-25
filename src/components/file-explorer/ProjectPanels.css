@@ -1,0 +1,228 @@
+.side-tabs {
+  display: flex;
+  flex: none;
+  gap: 2px;
+  padding: 4px var(--space-2) 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.side-tabs button {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 4px 4px 6px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.side-tabs button[aria-selected='true'] {
+  border-bottom-color: var(--color-accent);
+  color: var(--color-text);
+}
+
+.project-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-2);
+  font-size: var(--text-xs);
+}
+
+.project-panel h4 {
+  margin: 0 0 4px;
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.project-panel small {
+  color: var(--color-text-faint);
+}
+
+.project-panel__note {
+  margin: 0;
+  padding: 2px 4px;
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+}
+
+.project-panel__note.is-problem {
+  color: var(--color-warning-text);
+}
+
+.project-panel__list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.project-panel__list li > small {
+  display: block;
+  padding: 0 6px 4px 24px;
+}
+
+.project-panel__list button {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  width: 100%;
+  padding: 3px 6px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--color-text);
+  font-size: var(--text-xs);
+  text-align: left;
+  cursor: pointer;
+}
+
+.project-panel__list button:hover {
+  background: var(--color-surface-2);
+}
+
+.project-panel__path {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.project-panel__filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.project-panel__filter button {
+  padding: 1px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill);
+  background: none;
+  color: var(--color-text-muted);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.project-panel__filter button[aria-checked='true'] {
+  border-color: var(--color-accent);
+  color: var(--color-text);
+}
+
+.status-box {
+  display: grid;
+  gap: 4px;
+  padding: var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-2);
+  font-family: var(--font-mono);
+}
+
+.status-box progress {
+  width: 100%;
+  accent-color: var(--color-accent);
+}
+
+.status-box__current {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status-box__buttons {
+  display: flex;
+  gap: 6px;
+}
+
+.status-dot.is-prepared {
+  color: var(--evidence-verified);
+}
+
+.status-dot.is-processing,
+.status-dot.is-waiting {
+  color: var(--evidence-inferred);
+}
+
+.status-dot.is-failed {
+  color: var(--color-danger);
+}
+
+.status-dot.is-unsupported {
+  color: var(--color-text-faint);
+}
+
+.library {
+  border-bottom: 1px solid var(--color-border);
+}
+
+.library summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  padding: 4px;
+  cursor: pointer;
+}
+
+.library summary b {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.library__version {
+  color: var(--evidence-static);
+  font-family: var(--font-mono);
+}
+
+.library__version.is-unknown {
+  color: var(--evidence-inferred);
+}
+
+.library__body {
+  padding: 0 4px 6px 10px;
+}
+
+.library__body p {
+  margin: 2px 0;
+}
+
+.library__body a {
+  color: var(--syn-def);
+}
+
+.project-panel__list .asset-ref {
+  padding-left: 24px;
+  color: var(--color-text-muted);
+}
+
+.asset-ref__mark {
+  padding: 0 6px;
+  border: 1px solid currentColor;
+  border-radius: var(--radius-pill);
+  font-size: 10px;
+}
+
+.asset-ref__mark.is-certain {
+  color: var(--evidence-static);
+}
+
+.asset-ref__mark.is-likely {
+  color: var(--evidence-inferred);
+}
+
+.asset-ref__mark.is-unclear {
+  color: var(--evidence-unsupported);
+}
+
+.file-tree__state {
+  flex: none;
+  font-size: 10px;
+}

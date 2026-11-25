@@ -1,14 +1,19 @@
 import type { OutlineSymbol } from '../../core/parser/outline';
-import type { LeftOut, RepositoryFile } from '../../core/repository/types';
+import type { LeftOut } from '../../core/repository/types';
 import type { LineRange } from '../../core/source-mapping/types';
 import { OutlineList } from '../code-editor/OutlineList';
 import { Panel } from '../layout/Panel';
+import { useState } from 'react';
+import type { ProjectAnalysis } from '../../app/useProjectAnalysis';
+import type { ProjectSource } from '../../core/repository/types';
 import { FileExplorer } from './FileExplorer';
+import { AssetsPanel, LibrariesPanel, StatusPanel, useAssets } from './ProjectPanels';
 import './ExplorerSidebar.css';
 
 export interface ExplorerSidebarProps {
-  readonly projectName: string;
-  readonly files: readonly RepositoryFile[];
+  readonly project: ProjectSource;
+  readonly analysis: ProjectAnalysis;
+  readonly onGo: (path: string, line: number) => void;
   readonly selectedPath: string | null;
   readonly onSelectFile: (path: string) => void;
   /** Outline of the selected file; null when the file type has no outline. */
@@ -17,18 +22,38 @@ export interface ExplorerSidebarProps {
   readonly onSelectSymbol: (symbol: OutlineSymbol) => void;
   /** What the import did not keep. */
   readonly leftOut?: LeftOut | null;
-  /** Files kept in the project but too large (or not text) for the analysis. */
-  readonly notAnalysed?: readonly string[];
 }
 
+type SideTab = 'files' | 'libraries' | 'assets' | 'status';
+
 export function ExplorerSidebar(props: ExplorerSidebarProps) {
+  const [tab, setTab] = useState<SideTab>('files');
+  const { project, analysis } = props;
+  const assets = useAssets(project, analysis, tab === 'assets');
+  const s = analysis.snapshot;
+  const busy = s !== null && s.state === 'running' && s.remaining > 0;
   return (
-    <Panel title="Files" icon="folder" accentVar="--hue-sun" subtitle={props.projectName} className="explorer-sidebar">
-      <div className="explorer-sidebar__files">
-        <FileExplorer files={props.files} selectedPath={props.selectedPath} onSelect={props.onSelectFile} />
+    <Panel title="Files" icon="folder" accentVar="--hue-sun" subtitle={project.name} className="explorer-sidebar">
+      <div className="side-tabs" role="tablist" aria-label="Project" data-preparation={s?.state ?? 'reading'}>
+        {(['files', 'libraries', 'assets', 'status'] as const).map((t) => (
+          <button key={t} type="button" role="tab" aria-selected={tab === t} onClick={() => setTab(t)}>
+            {t === 'status' && busy ? `${s.total - s.remaining}/${s.total}` : t === 'status' && (s?.failed ?? 0) > 0 ? `status ✗${s!.failed}` : t}
+          </button>
+        ))}
       </div>
-      <LeftOutNote leftOut={props.leftOut ?? null} notAnalysed={props.notAnalysed ?? []} />
-      {props.outline ? (
+      <div className="explorer-sidebar__files" role="tabpanel">
+        {tab === 'files' ? (
+          <FileExplorer files={project.files} selectedPath={props.selectedPath} onSelect={props.onSelectFile} statuses={analysis.statuses} />
+        ) : tab === 'libraries' ? (
+          <LibrariesPanel project={project} analysis={analysis} onGo={props.onGo} />
+        ) : tab === 'assets' ? (
+          <AssetsPanel report={assets} onGo={props.onGo} onOpen={props.onSelectFile} />
+        ) : (
+          <StatusPanel analysis={analysis} onOpen={props.onSelectFile} />
+        )}
+      </div>
+      {tab === 'files' ? <LeftOutNote leftOut={props.leftOut ?? null} /> : null}
+      {props.outline && tab === 'files' ? (
         <section className="explorer-sidebar__outline" aria-label="Outline">
           <h3 className="explorer-sidebar__heading">Outline</h3>
           <div className="explorer-sidebar__outline-list">
@@ -41,8 +66,8 @@ export function ExplorerSidebar(props: ExplorerSidebarProps) {
 }
 
 /** Says plainly what is not in the list above, and why. */
-function LeftOutNote({ leftOut, notAnalysed }: { leftOut: LeftOut | null; notAnalysed: readonly string[] }) {
-  const count = (leftOut?.folders.length ?? 0) + (leftOut?.refused.length ?? 0) + notAnalysed.length;
+function LeftOutNote({ leftOut }: { leftOut: LeftOut | null }) {
+  const count = (leftOut?.folders.length ?? 0) + (leftOut?.refused.length ?? 0);
   if (count === 0) return null;
   return (
     <details className="left-out">
@@ -56,11 +81,6 @@ function LeftOutNote({ leftOut, notAnalysed }: { leftOut: LeftOut | null; notAna
         {leftOut?.refused.slice(0, 200).map((r, i) => (
           <li key={i}>
             <b>{r.path}</b> {r.reason}
-          </li>
-        ))}
-        {notAnalysed.map((p) => (
-          <li key={p}>
-            <b>{p}</b> kept, but not analysed (too large, or not text)
           </li>
         ))}
       </ul>

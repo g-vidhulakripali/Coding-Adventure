@@ -1,8 +1,8 @@
 import { Compartment, EditorState, type StateEffect } from '@codemirror/state';
-import { EditorView, highlightActiveLine, highlightActiveLineGutter, lineNumbers } from '@codemirror/view';
+import { EditorView, highlightActiveLine, highlightActiveLineGutter, keymap, lineNumbers } from '@codemirror/view';
 import { useEffect, useRef } from 'react';
 import type { ViewerLanguage } from '../../core/repository/fileTypes';
-import { highlightField, loadLanguage, playgroundSyntax, playgroundTheme, setHighlight, type ViewerHighlight } from './codemirrorSetup';
+import { highlightField, linkField, loadLanguage, playgroundSyntax, playgroundTheme, setHighlight, setLinks, type CodeLink, type ViewerHighlight } from './codemirrorSetup';
 import './CodeViewer.css';
 
 export interface CodeViewerProps {
@@ -14,6 +14,9 @@ export interface CodeViewerProps {
   readonly highlight: ViewerHighlight | null;
   /** Called when the user clicks a line number. */
   readonly onLineClick?: (line: number) => void;
+  /** Places in this file that lead to a definition; Ctrl/Cmd-click (or click on a link) follows them. */
+  readonly links?: readonly CodeLink[];
+  readonly onFollow?: (line: number, column: number) => void;
 }
 
 /**
@@ -22,12 +25,14 @@ export interface CodeViewerProps {
  * The document is never edited: `EditorState.readOnly` blocks changes while
  * still allowing selection, copy and keyboard navigation.
  */
-export function CodeViewer({ path, content, language, highlight, onLineClick }: CodeViewerProps) {
+export function CodeViewer({ path, content, language, highlight, onLineClick, links, onFollow }: CodeViewerProps) {
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView | null>(null);
   const languageSlot = useRef(new Compartment());
   const lineClick = useRef(onLineClick);
   lineClick.current = onLineClick;
+  const follow = useRef(onFollow);
+  follow.current = onFollow;
   const latestHighlight = useRef(highlight);
   latestHighlight.current = highlight;
 
@@ -67,6 +72,28 @@ export function CodeViewer({ path, content, language, highlight, onLineClick }: 
           playgroundTheme,
           playgroundSyntax,
           highlightField,
+          linkField,
+          EditorView.domEventHandlers({
+            mousedown(e, v) {
+              if (e.button !== 0 || !(e.ctrlKey || e.metaKey)) return false;
+              const pos = v.posAtCoords({ x: e.clientX, y: e.clientY });
+              if (pos === null) return false;
+              const line = v.state.doc.lineAt(pos);
+              follow.current?.(line.number, pos - line.from);
+              e.preventDefault();
+              return true;
+            },
+          }),
+          keymap.of([
+            {
+              key: 'F12',
+              run(v) {
+                const line = v.state.doc.lineAt(v.state.selection.main.head);
+                follow.current?.(line.number, v.state.selection.main.head - line.from);
+                return true;
+              },
+            },
+          ]),
           slot.of([]),
         ],
       }),
@@ -83,6 +110,11 @@ export function CodeViewer({ path, content, language, highlight, onLineClick }: 
       cancelled = true;
     };
   }, [path, content, language]);
+
+  // Underline what can be followed.
+  useEffect(() => {
+    view.current?.dispatch({ effects: setLinks.of(links ?? []) });
+  }, [links, path, content]);
 
   // Highlight changes within the same file.
   const highlightKey = highlight

@@ -16,17 +16,17 @@ import {
 import { ResizableRow, type RowPanel } from '../../components/layout/ResizableRow';
 import { VisualLabPanel } from '../../components/visual-lab/VisualLabPanel';
 import { useSimulationController } from '../../components/visual-lab/useSimulationController';
-import type { ViewerHighlight } from '../../components/code-editor/codemirrorSetup';
+import type { CodeLink, ViewerHighlight } from '../../components/code-editor/codemirrorSetup';
 import { extractPythonOutline, type FileOutline, type OutlineSymbol } from '../../core/parser/outline';
 import { defaultFileFor, loadProject } from '../../core/project/registry';
 import { isTextCategory } from '../../core/repository/fileTypes';
-import { ANALYSIS_LIMITS } from '../../core/import/limits';
-import type { ProjectSource, RepositoryFile } from '../../core/repository/types';
+import type { ProjectSource } from '../../core/repository/types';
 import type { LineRange } from '../../core/source-mapping/types';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
 import { usePreference } from '../../hooks/usePreference';
 import type { ThemePreference } from '../../hooks/useTheme';
 import { navigate } from '../router';
+import { normaliseNewlines, useProjectAnalysis } from '../useProjectAnalysis';
 import './WorkspaceRoute.css';
 
 type ProjectState =
@@ -71,6 +71,12 @@ export function WorkspaceRoute({ projectId, filePath, lines, theme, onThemeChang
   const project = projectState.status === 'ready' ? projectState.project : null;
   const file = useMemo(() => (project && filePath ? (project.files.find((f) => f.path === filePath) ?? null) : null), [project, filePath]);
 
+  // ---- Background preparation, simulation and the call map -----------------
+  const analysis = useProjectAnalysis(project, filePath);
+  const { index } = analysis;
+  const sim = useSimulationController(analysis.sources, analysis.dataFiles, filePath, analysis.analyses, index?.callIndex ?? null);
+  const { touches: simTouches, selectScenarioFor, selectScenarioAt } = sim;
+
   // ---- No file in the URL → open a sensible default ----------------------
   useEffect(() => {
     if (!project || filePath) return;
@@ -101,61 +107,18 @@ export function WorkspaceRoute({ projectId, filePath, lines, theme, onThemeChang
     };
   }, [project, file, filePath]);
 
-  const content: FileContentState = !filePath
-    ? { status: 'idle' }
-    : loaded && loaded.path === filePath
-      ? loaded.state
-      : { status: 'loading' };
+  const [rawNotebook, setRawNotebook] = useState<string | null>(null);
+  const original: FileContentState = !filePath ? { status: 'idle' } : loaded && loaded.path === filePath ? loaded.state : { status: 'loading' };
 
+  // Notebooks are shown as their cells (the text the analysis uses); the raw file is one click away.
+  const notebook = file?.category === 'notebook' && rawNotebook !== file.path ? (analysis.notebooks.get(file.path) ?? null) : null;
+  const content: FileContentState = useMemo(() => (notebook ? { status: 'ready', text: notebook.source } : original), [notebook, original]);
   const outline: FileOutline | null = useMemo(
-    () => (file?.category === 'python' && content.status === 'ready' ? extractPythonOutline(normaliseNewlines(content.text)) : null),
-    [file, content],
+    () => ((file?.category === 'python' || notebook) && content.status === 'ready' ? extractPythonOutline(normaliseNewlines(content.text)) : null),
+    [file, notebook, content],
   );
   const lineCount = content.status === 'ready' ? countLines(content.text) : null;
 
-  // ---- Python sources for simulation and the call map ----------------------
-  const [sources, setSources] = useState<Map<string, string> | null>(null);
-  // CSV files the code may read with pd.read_csv (data only; nothing is executed).
-  const [dataFiles, setDataFiles] = useState<Map<string, string> | null>(null);
-  const [notAnalysed, setNotAnalysed] = useState<readonly string[]>([]);
-  useEffect(() => {
-    if (!project) return;
-    let cancelled = false;
-    const left: string[] = [];
-    const read = async (wanted: (f: RepositoryFile) => boolean, fileLimit: number, totalLimit: number) => {
-      const out = new Map<string, string>();
-      let total = 0;
-      for (const f of project.files) {
-        if (!wanted(f)) continue;
-        if (cancelled) break;
-        if (f.size > fileLimit || total + f.size > totalLimit) {
-          left.push(f.path);
-          continue;
-        }
-        total += f.size;
-        // The analysis copy has uniform line endings; the original file stays as it is.
-        // A file that cannot be read as text is left out of the analysis, not the project.
-        await project.readText(f.path).then(
-          (text) => out.set(f.path, normaliseNewlines(text)),
-          () => left.push(f.path),
-        );
-      }
-      return out;
-    };
-    void (async () => {
-      const py = await read((f) => f.category === 'python' || f.name === 'setup.py', ANALYSIS_LIMITS.pythonFileBytes, ANALYSIS_LIMITS.pythonTotalBytes);
-      const csv = await read((f) => f.category === 'csv', ANALYSIS_LIMITS.csvFileBytes, ANALYSIS_LIMITS.csvTotalBytes);
-      if (cancelled) return;
-      setDataFiles(csv);
-      setSources(py);
-      setNotAnalysed(left);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [project]);
-  const sim = useSimulationController(sources, dataFiles, filePath);
-  const { touches: simTouches, selectScenarioFor, selectScenarioAt } = sim;
 
   // ---- Navigation helpers ------------------------------------------------
   const go = useCallback(
@@ -205,6 +168,27 @@ export function WorkspaceRoute({ projectId, filePath, lines, theme, onThemeChang
     setHighlightMode('route');
     go(filePath, null, true);
   }, [go, filePath]);
+
+  // ---- Names that lead to a definition in the project ---------------------
+  const links: readonly CodeLink[] = useMemo(() => {
+    if (!index || !filePath) return [];
+    const out: CodeLink[] = [];
+    for (const u of index.usesIn(filePath)) {
+      const { span, name } = u.use;
+      // Only the part of `a.b.c` that the target covers, and not a name on its own definition line.
+      const length = name.split('.').slice(0, u.covers).join('.').length;
+      if (span.startLine !== span.endLine || (u.target.path === filePath && u.target.line === span.startLine)) continue;
+      out.push({ line: span.startLine, from: span.startColumn ?? 0, to: (span.startColumn ?? 0) + length, title: `${u.target.name === '<module>' ? u.target.path : u.target.name} · ${u.target.path}:${u.target.line} (Ctrl+click)` });
+    }
+    return out;
+  }, [index, filePath]);
+  const follow = useCallback(
+    (line: number, column: number) => {
+      const found = filePath ? index?.at(filePath, line, column) : null;
+      if (found) go(found.target.path, { startLine: found.target.line, endLine: found.target.line });
+    },
+    [index, filePath, go],
+  );
 
   // ---- Keyboard shortcuts: Alt+1..4 switch layout ------------------------
   useEffect(() => {
@@ -291,18 +275,33 @@ export function WorkspaceRoute({ projectId, filePath, lines, theme, onThemeChang
   // ---- Panels ---------------------------------------------------------------
   const explorer = (
     <ExplorerSidebar
-      projectName={project.name}
-      files={project.files}
+      project={project}
+      analysis={analysis}
+      onGo={(path, line) => {
+        go(path, { startLine: line, endLine: line });
+        if (compact) setCompactPanel('code');
+      }}
       selectedPath={filePath}
       onSelectFile={selectFile}
       outline={outline ? outline.symbols : null}
       activeLines={lines}
       onSelectSymbol={selectSymbol}
       leftOut={project.leftOut ?? null}
-      notAnalysed={notAnalysed}
     />
   );
-  const code = <CodePanel file={file} content={content} highlight={codeHighlight} onLineClick={selectLine} onClearHighlight={clearHighlight} />;
+  const code = (
+    <CodePanel
+      file={file}
+      content={content}
+      highlight={codeHighlight}
+      onLineClick={selectLine}
+      onClearHighlight={clearHighlight}
+      project={project}
+      links={links}
+      onFollow={follow}
+      notebook={notebook}
+    />
+  );
   const lab = (
     <VisualLabPanel
       sim={sim}
@@ -319,6 +318,10 @@ export function WorkspaceRoute({ projectId, filePath, lines, theme, onThemeChang
       lineCount={lineCount}
       outline={outline}
       sim={sim}
+      analysis={analysis}
+      line={lines?.startLine ?? null}
+      onGo={(path, line) => go(path, { startLine: line, endLine: line })}
+      notebookView={file?.category === 'notebook' ? { raw: rawNotebook === file.path, toggle: () => setRawNotebook(rawNotebook === file.path ? null : file.path) } : null}
       onCollapse={compact ? undefined : () => setExplainCollapsed(true)}
     />
   );
@@ -367,10 +370,6 @@ export function WorkspaceRoute({ projectId, filePath, lines, theme, onThemeChang
       </main>
     </div>
   );
-}
-
-function normaliseNewlines(text: string): string {
-  return text.replace(/^\ufeff/, '').replace(/\r\n?/g, '\n');
 }
 
 function countLines(text: string): number {

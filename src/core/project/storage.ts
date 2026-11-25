@@ -1,24 +1,33 @@
+import type { FileAnalysis } from '../analysis/python/fileAnalysis';
 import { decodeText, planImport, readPlanned } from '../import/importProject';
 import { ANALYSIS_LIMITS } from '../import/limits';
-import type { ImportSource } from '../import/sources';
+import type { DirHandle, ImportSource, SourceRequest } from '../import/sources';
 import type { LeftOut, ProjectSource, RepositoryFile } from '../repository/types';
+import { ofProject, openDatabase, readAll, readKeys, readOne, result, write } from './database';
 
 /**
- * Imported projects, kept in this browser (IndexedDB). Nothing leaves the device.
- * File contents are stored as the original bytes under their original paths.
+ * Imported projects, kept in this browser. Nothing leaves the device. File contents
+ * are stored as the original bytes under their original paths.
+ *
+ * An import first stores what it needs to continue (the ZIP, or permission to the
+ * chosen folder). If the browser closes in between, it can be resumed and only the
+ * missing files are read again.
  */
 
-const DB_NAME = 'code-playground';
 const BATCH_BYTES = 8 * 1024 ** 2;
 const BATCH_FILES = 100;
+const LOCK_WAIT_MS = 8000;
 
-interface ProjectRecord {
+export interface ProjectRecord {
   readonly id: string;
   readonly name: string;
   readonly savedAt: number;
   readonly bytes: number;
   readonly files: readonly RepositoryFile[];
   readonly leftOut: LeftOut;
+  /** Missing on projects saved by earlier versions of the app, which were always complete. */
+  readonly status?: 'ready' | 'importing';
+  readonly total?: number;
 }
 
 export interface SavedProject {
@@ -27,50 +36,8 @@ export interface SavedProject {
   readonly savedAt: number;
   readonly bytes: number;
   readonly fileCount: number;
+  readonly unfinished: { readonly done: number; readonly total: number; readonly resumable: boolean } | null;
 }
-
-let dbPromise: Promise<IDBDatabase> | null = null;
-
-function open(): Promise<IDBDatabase> {
-  dbPromise ??= new Promise<IDBDatabase>((resolve, reject) => {
-    if (typeof indexedDB === 'undefined') {
-      reject(new Error('This browser does not allow saving projects here.'));
-      return;
-    }
-    const request = indexedDB.open(DB_NAME, 1);
-    request.onupgradeneeded = () => {
-      request.result.createObjectStore('projects', { keyPath: 'id' });
-      request.result.createObjectStore('files');
-    };
-    request.onsuccess = () => {
-      request.result.onversionchange = () => request.result.close();
-      resolve(request.result);
-    };
-    request.onerror = () => reject(request.error ?? new Error('The browser storage could not be opened.'));
-    request.onblocked = () => reject(new Error('The browser storage is in use by another tab.'));
-  }).catch((err: unknown) => {
-    dbPromise = null;
-    throw err;
-  });
-  return dbPromise;
-}
-
-function result<T>(request: IDBRequest<T>): Promise<T> {
-  return new Promise((resolve, reject) => {
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error ?? new Error('The browser storage failed.'));
-  });
-}
-
-function finished(tx: IDBTransaction): Promise<void> {
-  return new Promise((resolve, reject) => {
-    tx.oncomplete = () => resolve();
-    tx.onabort = tx.onerror = () =>
-      reject(tx.error?.name === 'QuotaExceededError' ? new Error('There is not enough free browser storage for this project.') : (tx.error ?? new Error('The browser storage failed.')));
-  });
-}
-
-const filesOf = (id: string) => IDBKeyRange.bound([id], [id, []]);
 
 export interface ImportProgress {
   readonly done: number;
@@ -80,19 +47,105 @@ export interface ImportProgress {
   readonly path: string;
 }
 
-/** Checks, reads and saves a project. On failure or cancel, nothing half-imported remains. */
+/** What an import can be continued from. */
+type Archive = { readonly kind: 'zip'; readonly name: string; readonly blob: Blob } | { readonly kind: 'opfs'; readonly name: string; readonly file: string } | { readonly kind: 'folder'; readonly handle: DirHandle };
+
+// ---- Temporary copy of the ZIP, for resuming ------------------------------------------
+
+async function opfs(): Promise<FileSystemDirectoryHandle | null> {
+  try {
+    const root = await navigator.storage.getDirectory();
+    return await root.getDirectoryHandle('imports', { create: true });
+  } catch {
+    return null;
+  }
+}
+
+/** Large archives go to the origin private file system (written in pieces); elsewhere to the database. */
+async function keepArchive(id: string, file: File): Promise<void> {
+  const dir = await opfs();
+  if (dir) {
+    try {
+      const handle = await dir.getFileHandle(id, { create: true });
+      const target = await handle.createWritable();
+      await file.stream().pipeTo(target);
+      await write('archives', (tx) => tx.objectStore('archives').put({ kind: 'opfs', name: file.name, file: id } satisfies Archive, id));
+      return;
+    } catch {
+      await dir.removeEntry(id).catch(() => undefined);
+    }
+  }
+  await write('archives', (tx) => tx.objectStore('archives').put({ kind: 'zip', name: file.name, blob: file } satisfies Archive, id));
+}
+
+async function dropArchive(id: string): Promise<void> {
+  const dir = await opfs();
+  await dir?.removeEntry(id).catch(() => undefined);
+  await write('archives', (tx) => tx.objectStore('archives').delete(id)).catch(() => undefined);
+}
+
+// ---- Import ---------------------------------------------------------------------------
+
+export interface SpaceCheck {
+  readonly needed: number;
+  readonly free: number | null;
+  readonly verdict: 'fits' | 'tight' | 'too-large' | 'unknown';
+}
+
+/** Compares what an import needs (including the temporary copy of a ZIP) with the free browser storage. */
+export async function checkSpace(needed: number): Promise<SpaceCheck> {
+  const e = await navigator.storage?.estimate?.().catch(() => null);
+  if (!e || e.quota === undefined || e.usage === undefined) return { needed, free: null, verdict: 'unknown' };
+  const free = Math.max(0, e.quota - e.usage);
+  return { needed, free, verdict: needed > free ? 'too-large' : needed > free * 0.8 ? 'tight' : 'fits' };
+}
+
+/** Holds a lock while importing, so that another tab does not "resume" a running import. */
+async function locked<T>(id: string, work: () => Promise<T>): Promise<T> {
+  if (!navigator.locks) return work();
+  // A tab that was just closed may need a moment to let go.
+  const waiting = new AbortController();
+  const timer = setTimeout(() => waiting.abort(), LOCK_WAIT_MS);
+  try {
+    return (await navigator.locks.request(`import:${id}`, { signal: waiting.signal }, () => {
+      clearTimeout(timer);
+      return work();
+    })) as T;
+  } catch (err) {
+    if (waiting.signal.aborted) throw new Error('This import is already running in another tab.');
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Checks, reads and saves a project. Cancelling removes it again; a crash leaves it resumable. */
 export async function importProject(source: ImportSource, onProgress: (p: ImportProgress) => void, signal?: AbortSignal): Promise<string> {
   const plan = planImport(source);
   if (plan.files.length === 0) {
     const reason = plan.leftOut.refused[0]?.reason;
     throw new Error(reason ? `Nothing could be imported: ${reason}.` : 'There are no files to import here.');
   }
-  const estimate = await navigator.storage?.estimate?.().catch(() => null);
-  if (estimate?.quota !== undefined && estimate.usage !== undefined && plan.bytes > estimate.quota - estimate.usage) {
-    throw new Error(`The project needs ${Math.ceil(plan.bytes / 1024 ** 2)} MB, but this browser has only ${Math.floor((estimate.quota - estimate.usage) / 1024 ** 2)} MB left.`);
-  }
-  const db = await open();
+  const space = await checkSpace(plan.bytes + (source.archive?.size ?? 0));
+  if (space.verdict === 'too-large') throw new Error(`The project needs about ${Math.ceil(space.needed / 1024 ** 2)} MB while importing, but this browser has only ${Math.floor(space.free! / 1024 ** 2)} MB left.`);
   const id = crypto.randomUUID();
+  return locked(id, async () => {
+    try {
+      const record: ProjectRecord = { id, name: plan.name, savedAt: Date.now(), bytes: 0, files: [], leftOut: plan.leftOut, status: 'importing', total: plan.files.length };
+      await write('projects', (tx) => tx.objectStore('projects').put(record));
+      if (source.archive) await keepArchive(id, source.archive);
+      else if (source.handle) await write('archives', (tx) => tx.objectStore('archives').put({ kind: 'folder', handle: source.handle! } satisfies Archive, id)).catch(() => undefined);
+      await store(id, source, new Set(), onProgress, signal);
+    } catch (err) {
+      await removeProject(id).catch(() => undefined);
+      throw err;
+    }
+    return id;
+  });
+}
+
+async function store(id: string, source: ImportSource, have: ReadonlySet<string>, onProgress: (p: ImportProgress) => void, signal?: AbortSignal): Promise<void> {
+  const plan = planImport(source);
   const refused = [...plan.leftOut.refused];
   const kept: RepositoryFile[] = [];
   let batch: Array<{ path: string; blob: Blob }> = [];
@@ -100,74 +153,142 @@ export async function importProject(source: ImportSource, onProgress: (p: Import
   let bytes = 0;
   const flush = async () => {
     if (batch.length === 0) return;
-    const tx = db.transaction('files', 'readwrite');
-    const done = finished(tx);
-    for (const f of batch) tx.objectStore('files').put(f.blob, [id, f.path]);
+    const now = batch;
     batch = [];
     batchBytes = 0;
-    await done;
+    await write('files', (tx) => {
+      for (const f of now) tx.objectStore('files').put(f.blob, [id, f.path]);
+    });
   };
-  try {
-    for await (const { file, blob } of readPlanned(plan, refused, signal)) {
-      kept.push(file);
-      if (blob) {
-        batch.push({ path: file.path, blob });
-        batchBytes += blob.size;
-        bytes += blob.size;
-      }
-      if (batchBytes > BATCH_BYTES || batch.length >= BATCH_FILES) await flush();
-      onProgress({ done: kept.length, total: plan.files.length, bytes, totalBytes: plan.bytes, path: file.path });
+  for await (const { file, blob, size } of readPlanned(plan, refused, signal, have)) {
+    kept.push(file);
+    bytes += size;
+    if (blob) {
+      batch.push({ path: file.path, blob });
+      batchBytes += blob.size;
     }
-    await flush();
-    const record: ProjectRecord = { id, name: plan.name, savedAt: Date.now(), bytes, files: kept, leftOut: { folders: plan.leftOut.folders, refused } };
-    const tx = db.transaction('projects', 'readwrite');
-    const done = finished(tx);
-    tx.objectStore('projects').put(record);
-    await done;
-  } catch (err) {
-    await removeProject(id).catch(() => undefined);
-    throw err;
+    if (batchBytes > BATCH_BYTES || batch.length >= BATCH_FILES) await flush();
+    onProgress({ done: kept.length, total: plan.files.length, bytes, totalBytes: plan.bytes, path: file.path });
   }
+  await flush();
+  const record: ProjectRecord = { id, name: plan.name, savedAt: Date.now(), bytes, files: kept, leftOut: { folders: plan.leftOut.folders, refused }, status: 'ready' };
+  await write('projects', (tx) => tx.objectStore('projects').put(record));
+  await dropArchive(id);
   // Ask the browser to keep the data even when disk space gets low (it may say no).
   void navigator.storage?.persist?.().catch(() => undefined);
-  return id;
 }
 
+/** Opens what an interrupted import came from again. Asks for folder permission when needed (call it from a click). */
+export async function reopenRequest(id: string): Promise<SourceRequest> {
+  const archive = await readOne<Archive>('archives', id);
+  if (!archive) throw new Error('What this project was imported from is no longer available. Remove it and import it again.');
+  if (archive.kind === 'folder') {
+    const h = archive.handle as DirHandle & { requestPermission?: (o: { mode: 'read' }) => Promise<string> };
+    if (h.requestPermission && (await h.requestPermission({ mode: 'read' })) !== 'granted') throw new Error('Reading the folder was not allowed.');
+    return { kind: 'folder', handle: archive.handle };
+  }
+  if (archive.kind === 'zip') return { kind: 'zip', file: new File([archive.blob], archive.name) };
+  const dir = await opfs();
+  const handle = await dir?.getFileHandle(archive.file).catch(() => null);
+  if (!handle) throw new Error('The temporary copy of the ZIP is gone. Remove this project and import it again.');
+  return { kind: 'zip', file: new File([await handle.getFile()], archive.name) };
+}
+
+export async function resumeImport(id: string, source: ImportSource, onProgress: (p: ImportProgress) => void, signal?: AbortSignal): Promise<void> {
+  await locked(id, async () => {
+    const keys = await readKeys('files', ofProject(id));
+    await store(id, source, new Set(keys.map((k) => (k as string[])[1]!)), onProgress, signal);
+  });
+}
+
+// ---- Library --------------------------------------------------------------------------
+
 export async function listProjects(): Promise<SavedProject[]> {
-  const db = await open();
-  const records = await result(db.transaction('projects').objectStore('projects').getAll() as IDBRequest<ProjectRecord[]>);
-  return records
-    .map((r) => ({ id: r.id, name: r.name, savedAt: r.savedAt, bytes: r.bytes, fileCount: r.files.length }))
-    .sort((a, b) => b.savedAt - a.savedAt);
+  const records = await readAll<ProjectRecord>('projects');
+  const out: SavedProject[] = [];
+  for (const r of records) {
+    let unfinished: SavedProject['unfinished'] = null;
+    if (r.status === 'importing') {
+      const done = (await readKeys('files', ofProject(r.id))).length;
+      unfinished = { done, total: r.total ?? 0, resumable: (await readOne('archives', r.id)) !== undefined };
+    }
+    out.push({ id: r.id, name: r.name, savedAt: r.savedAt, bytes: r.bytes, fileCount: r.files.length, unfinished });
+  }
+  return out.sort((a, b) => b.savedAt - a.savedAt);
 }
 
 export async function removeProject(id: string): Promise<void> {
-  const db = await open();
-  const tx = db.transaction(['projects', 'files'], 'readwrite');
-  const done = finished(tx);
-  tx.objectStore('projects').delete(id);
-  tx.objectStore('files').delete(filesOf(id));
-  await done;
+  await write(['projects', 'files', 'analysis'], (tx) => {
+    tx.objectStore('projects').delete(id);
+    tx.objectStore('files').delete(ofProject(id));
+    tx.objectStore('analysis').delete(ofProject(id));
+  });
+  await dropArchive(id);
+}
+
+export interface StorageOverview {
+  readonly usage: number | null;
+  readonly quota: number | null;
+  /** Whether the browser promised to keep the data. */
+  readonly kept: boolean | null;
+}
+
+export async function storageOverview(): Promise<StorageOverview> {
+  const e = await navigator.storage?.estimate?.().catch(() => null);
+  const kept = await navigator.storage?.persisted?.().catch(() => null);
+  return { usage: e?.usage ?? null, quota: e?.quota ?? null, kept: kept ?? null };
+}
+
+export async function askToKeep(): Promise<boolean> {
+  return (await navigator.storage?.persist?.().catch(() => false)) ?? false;
+}
+
+// ---- Reading ---------------------------------------------------------------------------
+
+export async function readRecord(id: string): Promise<ProjectRecord | undefined> {
+  return readOne<ProjectRecord>('projects', id);
+}
+
+export async function readBlob(id: string, path: string): Promise<Blob | undefined> {
+  return readOne<Blob>('files', [id, path]);
+}
+
+export async function loadAnalyses(id: string): Promise<Map<string, FileAnalysis>> {
+  const db = await openDatabase();
+  const store = db.transaction('analysis').objectStore('analysis');
+  const all = await result(store.getAll(ofProject(id)) as IDBRequest<FileAnalysis[]>);
+  return new Map(all.map((a) => [a.path, a]));
+}
+
+export async function saveAnalysis(id: string, a: FileAnalysis): Promise<void> {
+  // The project may have been removed while its analysis was still running.
+  if (!(await readRecord(id))) return;
+  await write('analysis', (tx) => tx.objectStore('analysis').put(a, [id, a.path]));
 }
 
 export async function loadSavedProject(id: string): Promise<ProjectSource | null> {
-  const db = await open();
-  const record = await result(db.transaction('projects').objectStore('projects').get(id) as IDBRequest<ProjectRecord | undefined>);
-  if (!record) return null;
+  const record = await readRecord(id);
+  if (!record || record.status === 'importing') return null;
   const byPath = new Map(record.files.map((f) => [f.path, f]));
+  const blobOf = async (path: string): Promise<Blob> => {
+    const file = byPath.get(path);
+    if (!file) throw new Error(`This project has no file at “${path}”.`);
+    const blob = await readBlob(id, path);
+    if (!blob) throw new Error(file.note ?? 'The content of this file is not stored.');
+    return blob;
+  };
   return {
     id: record.id,
     name: record.name,
     origin: 'import',
     files: record.files,
     leftOut: record.leftOut,
+    readBlob: blobOf,
     async readText(path) {
       const file = byPath.get(path);
-      if (!file) throw new Error(`This project has no file at “${path}”.`);
-      if (file.size > ANALYSIS_LIMITS.viewerBytes) throw new Error(`${file.name} is ${(file.size / 1024 ** 2).toFixed(1)} MB, which is too large to show as text.`);
-      const blob = await result(db.transaction('files').objectStore('files').get([id, path]) as IDBRequest<Blob | undefined>);
-      if (!blob) throw new Error(file.note ?? 'The content of this file is not stored.');
-      return decodeText(blob);
+      if (file && file.size > ANALYSIS_LIMITS.viewerBytes) throw new Error(`${file.name} is ${(file.size / 1024 ** 2).toFixed(1)} MB, which is too large to show as text.`);
+      return decodeText(await blobOf(path));
     },
+    analysisStore: { load: () => loadAnalyses(id), save: (a) => saveAnalysis(id, a) },
   };
 }

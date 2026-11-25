@@ -6,7 +6,9 @@ import { usePreference } from '../../hooks/usePreference';
 import { Icon } from '../common/Icon';
 import { Panel } from '../layout/Panel';
 import { CallMap } from './CallMap';
+import { MODEL_LABELS, modelsAt } from '../../core/models/detect';
 import { InputsPanel, PlaybackControls } from './LabControls';
+import { ModelDemo } from './ModelDemo';
 import { Stage2D } from './Stage2D';
 import { StepCard } from './StepCard';
 import { STEP_INTERVAL_MS, type SimulationController } from './useSimulationController';
@@ -92,6 +94,17 @@ export function VisualLabPanel({ sim, currentFile, onNavigate }: VisualLabPanelP
 
   const assumed = useMemo(() => new Set(sim.trace?.steps.flatMap((s) => (s.assumption ? [s.assumption.key] : s.title === 'One example item' ? [`${s.span.path}:${s.span.startLine}`] : []))).size, [sim.trace]);
 
+  // Models (machine learning) near the code that is being shown: their inside can be watched with fake values.
+  const step = sim.step;
+  const current = step?.frames[step.frames.length - 1];
+  const within = current?.kind === 'function' ? current.name.replace(/\.<locals>/g, '') : sim.scenario?.kind === 'function' ? sim.scenario.name : sim.scenario?.kind === 'method' ? `${sim.scenario.className}.${sim.scenario.method}` : null;
+  const place = step?.span.path ?? currentFile;
+  const near = useMemo(() => (place ? modelsAt({ path: place, within, line: step?.span.startLine ?? null }, sim.models, sim.callIndex) : { here: false, uses: [] }), [place, within, step, sim.models, sim.callIndex]);
+  const inFile = useMemo(() => (currentFile && currentFile !== place ? modelsAt({ path: currentFile, within: null, line: null }, sim.models, null).uses : []), [currentFile, place, sim.models]);
+  const uses = near.uses.length > 0 ? near.uses : inFile;
+  const [watched, setWatched] = useState<typeof uses | null>(null);
+  useEffect(() => setWatched(null), [sim.scenario?.id, currentFile]);
+
   // Animate only single forward steps; jumps and backwards moves snap.
   const prevIndex = useRef(sim.stepIndex);
   const prevTrace = useRef(sim.trace);
@@ -104,7 +117,7 @@ export function VisualLabPanel({ sim, currentFile, onNavigate }: VisualLabPanelP
 
   // Keyboard: ← → step, space play/pause (ignored while typing or inside the code editor).
   useEffect(() => {
-    if (labMode !== 'simulation') return;
+    if (labMode !== 'simulation' || watched) return;
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null;
       if (!t || t.closest('input, textarea, select, [contenteditable="true"], .cm-editor') || e.altKey || e.ctrlKey || e.metaKey) return;
@@ -117,7 +130,7 @@ export function VisualLabPanel({ sim, currentFile, onNavigate }: VisualLabPanelP
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [labMode, sim]);
+  }, [labMode, sim, watched]);
 
   const actions = (
     <>
@@ -203,6 +216,18 @@ export function VisualLabPanel({ sim, currentFile, onNavigate }: VisualLabPanelP
                     : `try ${sim.suggestedScenario.name}()`}
               </button>
             ) : null}
+            {uses.length > 0 && sim.ready ? (
+              <button
+                type="button"
+                className={`btn btn--ghost lab__model${near.here ? ' is-here' : ''}`}
+                aria-pressed={watched !== null}
+                onClick={() => setWatched(watched ? null : uses)}
+                title="See what happens inside this kind of model, with fake values"
+              >
+                🧠 {MODEL_LABELS[uses[0]!.kind]}
+                {uses.length > 1 ? ` +${uses.length - 1}` : ''}
+              </button>
+            ) : null}
             {sim.trace ? (
               <span className={`chip lab__status is-${sim.trace.status}`} title={sim.trace.stop?.message ?? 'The simulation ran to the end.'}>
                 {sim.trace.status === 'completed' ? (sim.trace.steps.some((s) => s.output?.t === 'unknown') ? '✓ to the end, some ?' : '✓ ran to the end') : sim.trace.stop?.kind === 'error' ? (sim.trace.steps[sim.trace.steps.length - 1]?.evidence === 'inferred' ? '✗ maybe an error' : '✗ raises an error') : sim.trace.stop?.kind === 'limit' ? '■ stopped at limit' : sim.trace.stop?.kind === 'missing-data' ? '📄 needs data' : '■ stops: unsupported'}
@@ -216,7 +241,9 @@ export function VisualLabPanel({ sim, currentFile, onNavigate }: VisualLabPanelP
           </div>
 
           <div className="lab__stage">
-            {!sim.ready ? (
+            {watched ? (
+              <ModelDemo key={watched[0]!.kind} uses={watched} onClose={() => setWatched(null)} onNavigate={onNavigate} />
+            ) : !sim.ready ? (
               <p className="lab-message">Reading Python files…</p>
             ) : !sim.scenario ? (
               <div className="lab-empty">
@@ -229,7 +256,7 @@ export function VisualLabPanel({ sim, currentFile, onNavigate }: VisualLabPanelP
                   <Stage3D scene={scene} durationMs={durationMs} resetSignal={resetSignal} onUnavailable={(reason) => setWebglError(reason)} />
                 </Suspense>
               ) : (
-                <Stage2D scene={scene} trace={sim.trace} stepIndex={sim.stepIndex} sources={sim.sources ?? NO_SOURCES} durationMs={durationMs} onChoose={sim.choose} />
+                <Stage2D scene={scene} trace={sim.trace} stepIndex={sim.stepIndex} sources={sim.sources ?? NO_SOURCES} durationMs={durationMs} onChoose={sim.choose} onJump={sim.goTo} />
               )
             ) : (
               <p className="lab-message">No steps recorded.</p>
@@ -241,7 +268,7 @@ export function VisualLabPanel({ sim, currentFile, onNavigate }: VisualLabPanelP
           </div>
 
           {/* Step facts and inputs share one docked area, so nothing is pushed below the fold. */}
-          {sim.scenario ? (
+          {sim.scenario && !watched ? (
             <section className={`lab__dock${dockOpen ? '' : ' is-closed'}`}>
               <div className="lab__dock-tabs" role="tablist" aria-label="Step details and inputs">
                 <button type="button" role="tab" aria-selected={dockOpen && dockTab === 'step'} onClick={() => selectDockTab('step')} disabled={!sim.step}>
@@ -283,7 +310,7 @@ export function VisualLabPanel({ sim, currentFile, onNavigate }: VisualLabPanelP
               ) : null}
             </section>
           ) : null}
-          <PlaybackControls sim={sim} />
+          {watched ? null : <PlaybackControls sim={sim} />}
         </div>
       )}
     </Panel>

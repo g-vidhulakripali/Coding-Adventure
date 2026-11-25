@@ -6,6 +6,12 @@ import type { Expr, FunctionDef, Module, Stmt } from '../parser/python/ast';
  * Used only to offer the right input boxes. A guess here never becomes a value.
  */
 
+/** Parsed files by path (a Map, or something that parses on demand). */
+export interface ModuleLookup {
+  get(path: string): Module | undefined;
+  keys(): Iterable<string>;
+}
+
 export type ParamShape = 'value' | 'table' | 'dict';
 
 export interface ParamHint {
@@ -22,7 +28,7 @@ const COLUMN_ATTRS = new Set(['to_numpy', 'mean', 'median', 'std', 'sum', 'max',
 const DICT_ATTRS = new Set(['get', 'items', 'keys', 'values', 'setdefault', 'pop', 'update']);
 
 /** Text a constant such as `K.HEIGHT_COL` stands for, when it is written down plainly in the project. */
-export function constantText(e: Expr, module: Module, path: string, modules: ReadonlyMap<string, Module>): string | null {
+export function constantText(e: Expr, module: Module, path: string, modules: ModuleLookup): string | null {
   if (e.type === 'Constant') return e.kind === 'str' ? (e.value as string) : null;
   if (e.type === 'Name') return topLevelText(module, e.id);
   if (e.type !== 'Attribute' || e.value.type !== 'Name') return null;
@@ -49,7 +55,7 @@ function topLevelText(module: Module, name: string): string | null {
   return null;
 }
 
-export function paramHints(def: FunctionDef, path: string, modules: ReadonlyMap<string, Module>): ReadonlyMap<string, ParamHint> {
+export function paramHints(def: FunctionDef, path: string, modules: ModuleLookup): ReadonlyMap<string, ParamHint> {
   const module = modules.get(path);
   const names = new Set(def.params.filter((p) => p.kind !== 'varargs' && p.kind !== 'varkw').map((p) => p.name));
   const info = new Map([...names].map((n) => [n, { table: 0, dict: 0, keys: [] as string[], compared: new Map<string, string[]>() }]));

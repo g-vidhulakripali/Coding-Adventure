@@ -166,3 +166,7 @@ function isUtf8(bytes: Uint8Array): boolean {
     return false;
   }
 }
+
+export function crc32(bytes: Uint8Array): number {
+  return (updateCrc(0xffffffff, bytes) ^ 0xffffffff) >>> 0;
+}

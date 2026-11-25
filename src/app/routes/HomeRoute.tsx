@@ -1,5 +1,6 @@
 import { Icon } from '../../components/common/Icon';
-import { ImportCard } from '../../components/import/ImportCard';
+import { useCallback, useState } from 'react';
+import { ImportCard, type ImportJob } from '../../components/import/ImportCard';
 import { SavedProjects } from '../../components/import/SavedProjects';
 import { AppHeader } from '../../components/layout/AppHeader';
 import type { ThemePreference } from '../../hooks/useTheme';
@@ -26,6 +27,17 @@ const HERO_LINES: ReadonlyArray<ReadonlyArray<[string, string]>> = [
 const openProject = (projectId: string) => navigate({ name: 'workspace', projectId, file: null, lines: null });
 
 export function HomeRoute({ theme, onThemeChange }: HomeRouteProps) {
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [job, setJob] = useState<ImportJob | null>(null);
+  const refresh = useCallback(() => setRefreshKey((n) => n + 1), []);
+  const imported = useCallback(
+    (ids: readonly string[]) => {
+      refresh();
+      // A backup of several projects stays on this page, where they all appear.
+      if (ids.length === 1) openProject(ids[0]!);
+    },
+    [refresh],
+  );
   return (
     <div className="home">
       <AppHeader theme={theme} onThemeChange={onThemeChange} />
@@ -79,8 +91,8 @@ export function HomeRoute({ theme, onThemeChange }: HomeRouteProps) {
         </section>
 
         <section className="home__actions" aria-label="Get started">
-          <ImportCard onImported={openProject} />
-          <SavedProjects onOpen={openProject} />
+          <ImportCard job={job} onImported={imported} onChanged={refresh} />
+          <SavedProjects refreshKey={refreshKey} onOpen={openProject} onJob={setJob} />
           <article className="file-card file-card--active">
             <div className="file-card__tab">
               <span style={{ color: 'var(--lab-loop)' }}>

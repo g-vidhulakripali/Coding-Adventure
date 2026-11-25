@@ -77,24 +77,32 @@ export function planImport(source: ImportSource): ImportPlan {
 
 export interface ReadFile {
   readonly file: RepositoryFile;
+  /** Null when the content is not stored, or is stored already. */
   readonly blob: Blob | null;
+  /** Bytes that are stored for this file. */
+  readonly size: number;
 }
 
 /** Reads the planned files one by one; a file that fails is reported and the rest continues. */
-export async function* readPlanned(plan: ImportPlan, refused: Array<{ path: string; reason: string }>, signal?: AbortSignal): AsyncGenerator<ReadFile> {
+export async function* readPlanned(plan: ImportPlan, refused: Array<{ path: string; reason: string }>, signal?: AbortSignal, have: ReadonlySet<string> = new Set()): AsyncGenerator<ReadFile> {
   for (const { file, candidate } of plan.files) {
     if (signal?.aborted) throw new DOMException('Import cancelled', 'AbortError');
     if (!candidate) {
-      yield { file, blob: null };
+      yield { file, blob: null, size: 0 };
+      continue;
+    }
+    if (have.has(file.path)) {
+      yield { file, blob: null, size: file.size };
       continue;
     }
     try {
       const blob = await candidate.read();
       // Copy the bytes: a File from disk would change (or vanish) with the original.
-      yield { file, blob: new Blob([await blob.arrayBuffer()]) };
+      const copy = new Blob([await blob.arrayBuffer()]);
+      yield { file: copy.size === file.size ? file : { ...file, size: copy.size }, blob: copy, size: copy.size };
     } catch (err) {
       refused.push({ path: file.path, reason: err instanceof Error ? err.message : 'it could not be read' });
-      yield { file: { ...file, note: 'Not stored: it could not be read.' }, blob: null };
+      yield { file: { ...file, note: 'Not stored: it could not be read.' }, blob: null, size: 0 };
     }
   }
 }

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { CATEGORY_INFO } from '../../core/repository/fileTypes';
 import { ancestorFolders, buildRepositoryTree, filterTree } from '../../core/repository/tree';
+import type { FileStatus } from '../../core/prepare/preparation';
 import type { FolderNode, RepositoryFile, RepositoryTreeNode } from '../../core/repository/types';
 import { Icon } from '../common/Icon';
 import './FileExplorer.css';
@@ -9,13 +10,15 @@ export interface FileExplorerProps {
   readonly files: readonly RepositoryFile[];
   readonly selectedPath: string | null;
   readonly onSelect: (path: string) => void;
+  /** Preparation state of each file, when known. */
+  readonly statuses?: ReadonlyMap<string, FileStatus>;
 }
 
 /**
  * Repository file tree. Shows every file in the project — supported or not —
  * with its original name and position in the folder structure.
  */
-export function FileExplorer({ files, selectedPath, onSelect }: FileExplorerProps) {
+export function FileExplorer({ files, selectedPath, onSelect, statuses }: FileExplorerProps) {
   const tree = useMemo(() => buildRepositoryTree(files), [files]);
   const [query, setQuery] = useState('');
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set(topLevelFolders(tree)));
@@ -71,6 +74,7 @@ export function FileExplorer({ files, selectedPath, onSelect }: FileExplorerProp
               selectedPath={selectedPath}
               onToggle={toggle}
               onSelect={onSelect}
+              statuses={statuses}
             />
           ))}
         </ul>
@@ -93,14 +97,21 @@ interface TreeNodeProps {
   readonly selectedPath: string | null;
   readonly onToggle: (path: string) => void;
   readonly onSelect: (path: string) => void;
+  readonly statuses: ReadonlyMap<string, FileStatus> | undefined;
 }
 
-function TreeNode({ node, depth, expanded, forceExpanded, selectedPath, onToggle, onSelect }: TreeNodeProps) {
+/** Folders with more entries than this show the rest on request, so a huge folder does not slow the page down. */
+const FOLDER_PAGE = 300;
+
+function TreeNode({ node, depth, expanded, forceExpanded, selectedPath, onToggle, onSelect, statuses }: TreeNodeProps) {
+  const [shown, setShown] = useState(FOLDER_PAGE);
   const indent = { paddingLeft: `${8 + depth * 14}px` };
 
   if (node.kind === 'file') {
     const info = CATEGORY_INFO[node.file.category];
     const selected = node.path === selectedPath;
+    const status = statuses?.get(node.path);
+    const mark = status && status.state !== 'prepared' && status.state !== 'unsupported' ? status.state : null;
     return (
       <li role="treeitem" aria-selected={selected} className="file-tree__item">
         <button
@@ -115,6 +126,11 @@ function TreeNode({ node, depth, expanded, forceExpanded, selectedPath, onToggle
             {info.badge}
           </span>
           <span className="file-tree__name">{node.name}</span>
+          {mark ? (
+            <span className={`file-tree__state status-dot is-${mark}`} title={status?.reason ?? mark}>
+              {mark === 'failed' ? '✗' : mark === 'processing' ? '◐' : '○'}
+            </span>
+          ) : null}
           {node.file.category === 'other' ? (
             <span className="file-tree__flag" title="Unsupported file type — metadata only">
               unsupported
@@ -136,7 +152,7 @@ function TreeNode({ node, depth, expanded, forceExpanded, selectedPath, onToggle
       </button>
       {isOpen ? (
         <ul role="group" className="file-tree">
-          {node.children.map((child) => (
+          {node.children.slice(0, shown).map((child) => (
             <TreeNode
               key={child.path}
               node={child}
@@ -146,8 +162,16 @@ function TreeNode({ node, depth, expanded, forceExpanded, selectedPath, onToggle
               selectedPath={selectedPath}
               onToggle={onToggle}
               onSelect={onSelect}
+              statuses={statuses}
             />
           ))}
+          {node.children.length > shown ? (
+            <li role="none">
+              <button type="button" className="file-tree__row" style={{ paddingLeft: `${22 + depth * 14}px` }} onClick={() => setShown(shown + 1000)}>
+                show {node.children.length - shown} more…
+              </button>
+            </li>
+          ) : null}
         </ul>
       ) : null}
     </li>

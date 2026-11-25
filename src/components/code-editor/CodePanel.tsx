@@ -1,10 +1,13 @@
 import { CATEGORY_INFO, isTextCategory, viewerLanguageFor } from '../../core/repository/fileTypes';
-import type { RepositoryFile } from '../../core/repository/types';
+import { useState } from 'react';
+import type { NotebookText } from '../../core/repository/notebook';
+import type { ProjectSource, RepositoryFile } from '../../core/repository/types';
 import { Icon } from '../common/Icon';
 import { formatBytes } from '../file-explorer/FileExplorer';
 import { Panel } from '../layout/Panel';
 import { CodeViewer } from './CodeViewer';
-import type { ViewerHighlight } from './codemirrorSetup';
+import type { CodeLink, ViewerHighlight } from './codemirrorSetup';
+import { FilePreview, previewKind } from './FilePreview';
 import './CodePanel.css';
 
 export type FileContentState =
@@ -19,10 +22,20 @@ export interface CodePanelProps {
   readonly highlight: ViewerHighlight | null;
   readonly onLineClick: (line: number) => void;
   readonly onClearHighlight: () => void;
+  readonly project?: ProjectSource;
+  readonly links?: readonly CodeLink[];
+  readonly onFollow?: (line: number, column: number) => void;
+  /** Set for notebooks: their cells as Python, and the way to see the raw file. */
+  readonly notebook?: NotebookText | null;
 }
 
 /** Original-source panel: path breadcrumb, viewer, and honest states for non-text files. */
-export function CodePanel({ file, content, highlight, onLineClick, onClearHighlight }: CodePanelProps) {
+export function CodePanel({ file, content, highlight, onLineClick, onClearHighlight, project, links, onFollow, notebook }: CodePanelProps) {
+  const kind = file ? previewKind(file.category) : null;
+  // Per file: what the user chose, else the view that fits the type. Asking for a line shows the source.
+  const [choice, setChoice] = useState<{ path: string; view: 'preview' | 'source' } | null>(null);
+  const view = choice && choice.path === file?.path ? choice.view : kind && !highlight ? 'preview' : 'source';
+  const isNotebook = file?.category === 'notebook' && !!notebook;
   return (
     <Panel
       title="Source"
@@ -30,21 +43,48 @@ export function CodePanel({ file, content, highlight, onLineClick, onClearHighli
       accentVar="--lab-variable"
       subtitle={file ? <Breadcrumb path={file.path} /> : undefined}
       actions={
-        highlight ? (
+        <>
+        {file && project && kind && file.category !== 'image' ? (
+          <div className="seg" role="radiogroup" aria-label="How to show this file">
+            {(['preview', 'source'] as const).map((v) => (
+              <button key={v} type="button" role="radio" aria-checked={view === v} onClick={() => setChoice({ path: file.path, view: v })}>
+                {v}
+              </button>
+            ))}
+          </div>
+        ) : null}
+        {isNotebook ? (
+          <select className="notebook-cells" value="" onChange={(e) => onLineClick(Number(e.target.value))} aria-label="Go to cell">
+            <option value="" disabled>
+              {notebook.cells.length} cells
+            </option>
+            {notebook.cells.map((c) => (
+              <option key={c.number} value={c.startLine}>
+                {c.number} {c.kind === 'code' ? '▸' : '¶'} {c.title || '(empty)'}
+              </option>
+            ))}
+          </select>
+        ) : null}
+        {highlight ? (
           <button type="button" className="chip chip--button" onClick={onClearHighlight} title="Clear highlight">
             {highlight.startLine === highlight.endLine ? `L${highlight.startLine}` : `L${highlight.startLine}–${highlight.endLine}`}
             <Icon name="close" className="chip__icon" />
           </button>
-        ) : null
+        ) : null}
+        </>
       }
       className="code-panel"
     >
-      <CodePanelBody file={file} content={content} highlight={highlight} onLineClick={onLineClick} />
+      {file && project && kind && view === 'preview' ? (
+        <FilePreview project={project} file={file} />
+      ) : (
+        <CodePanelBody file={file} content={content} highlight={highlight} onLineClick={onLineClick} links={links} onFollow={onFollow} isNotebook={isNotebook} />
+      )}
     </Panel>
   );
 }
 
-function CodePanelBody({ file, content, highlight, onLineClick }: Omit<CodePanelProps, 'onClearHighlight'>) {
+function CodePanelBody({ file, content, highlight, onLineClick, links, onFollow, isNotebook }: Omit<CodePanelProps, 'onClearHighlight' | 'project' | 'notebook'> & { isNotebook: boolean }) {
   if (!file) {
     // A deep link can name a path the project does not contain; say so instead of pretending nothing was asked for.
     if (content.status === 'error') return <PanelMessage title="File not found" body={content.message} tone="error" />;
@@ -55,7 +95,7 @@ function CodePanelBody({ file, content, highlight, onLineClick }: Omit<CodePanel
     const info = CATEGORY_INFO[file.category];
     return (
       <PanelMessage
-        title={file.category === 'image' ? 'Image preview not available yet' : 'Unsupported file type'}
+        title={file.category === 'image' ? 'Image' : 'No viewer for this file type'}
         body={`${file.name} · ${info.label} · ${formatBytes(file.size)}. ${file.note ?? 'This file is kept unchanged in the project. A preview for this file type is not available yet.'}`}
       />
     );
@@ -72,9 +112,11 @@ function CodePanelBody({ file, content, highlight, onLineClick }: Omit<CodePanel
         <CodeViewer
           path={file.path}
           content={content.text}
-          language={viewerLanguageFor(file.path, file.category)}
+          language={isNotebook ? 'python' : viewerLanguageFor(file.path, file.category)}
           highlight={highlight}
           onLineClick={onLineClick}
+          links={links}
+          onFollow={onFollow}
         />
       );
   }

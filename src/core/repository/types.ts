@@ -1,3 +1,5 @@
+import type { FileAnalysis } from '../analysis/python/fileAnalysis';
+
 /**
  * The ORIGINAL repository representation.
  *
@@ -82,4 +84,8 @@ export interface ProjectSource {
   readonly leftOut?: LeftOut;
   /** Returns the original text of a file, or rejects if the file is unknown or not text. */
   readText(path: string): Promise<string>;
+  /** Returns the original bytes of a file, or rejects if they are not stored. */
+  readBlob(path: string): Promise<Blob>;
+  /** Where prepared results are kept, if anywhere. */
+  readonly analysisStore?: { load(): Promise<ReadonlyMap<string, FileAnalysis>>; save(a: FileAnalysis): Promise<void> };
 }

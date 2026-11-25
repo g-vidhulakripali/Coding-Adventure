@@ -1,69 +1,82 @@
 import { useCallback, useEffect, useRef, useState, type DragEvent } from 'react';
-import { canPickFolder, fromDrop, fromFileList, fromZip, pickFolder, type ImportSource } from '../../core/import/sources';
-import { importProject, type ImportProgress } from '../../core/project/storage';
+import { canPickFolder, fromDrop, pickFolder, requestFromFileList, type SourceRequest } from '../../core/import/sources';
+import type { ImportProgress } from '../../core/project/storage';
+import { ImportCancelled, runImport, type ImportRun } from '../../workers/importRunner';
 import { Icon } from '../common/Icon';
 import { formatBytes } from '../file-explorer/FileExplorer';
 import './ImportCard.css';
 
+export interface ImportJob {
+  readonly request: () => Promise<SourceRequest | null>;
+  /** Project whose interrupted import continues. */
+  readonly resume?: string;
+}
+
 type State =
   | { readonly status: 'idle' }
   | { readonly status: 'reading' }
-  | { readonly status: 'saving'; readonly name: string; readonly progress: ImportProgress | null }
+  | { readonly status: 'saving'; readonly name: string; readonly progress: ImportProgress | null; readonly startedAt: number }
   | { readonly status: 'error'; readonly message: string };
 
-/** Choose or drop a folder or ZIP. Everything is checked and saved in this browser only. */
-export function ImportCard({ onImported }: { onImported: (projectId: string) => void }) {
+/** Choose or drop a folder, a ZIP or a backup. Everything is checked and saved in this browser only. */
+export function ImportCard({ job, onImported, onChanged }: { job: ImportJob | null; onImported: (ids: readonly string[]) => void; onChanged: () => void }) {
   const [state, setState] = useState<State>({ status: 'idle' });
   const [over, setOver] = useState(false);
   const zipInput = useRef<HTMLInputElement>(null);
   const folderInput = useRef<HTMLInputElement>(null);
-  const abort = useRef<AbortController | null>(null);
+  const run = useRef<ImportRun | null>(null);
+  const mounted = useRef(true);
   const busy = state.status === 'reading' || state.status === 'saving';
 
-  useEffect(() => () => abort.current?.abort(), []);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
-  const run = useCallback(
-    async (getSource: () => Promise<ImportSource | null>) => {
-      const controller = new AbortController();
-      abort.current = controller;
+  const start = useCallback(
+    async ({ request, resume }: ImportJob) => {
       setState({ status: 'reading' });
       try {
-        const source = await getSource();
-        if (!source || controller.signal.aborted) {
+        const source = await request();
+        if (!source) {
           setState({ status: 'idle' });
           return;
         }
-        setState({ status: 'saving', name: source.name, progress: null });
-        let shown = 0;
-        const id = await importProject(
-          source,
-          (progress) => {
-            const now = performance.now();
-            if (now - shown < 80 && progress.done < progress.total) return;
-            shown = now;
-            setState({ status: 'saving', name: source.name, progress });
-          },
-          controller.signal,
-        );
-        onImported(id);
+        const startedAt = performance.now();
+        run.current = runImport({ source, ...(resume ? { resume } : {}) }, (name, progress) => {
+          if (mounted.current) setState({ status: 'saving', name, progress, startedAt });
+        });
+        const ids = await run.current.done;
+        if (mounted.current) {
+          setState({ status: 'idle' });
+          onImported(ids);
+        }
       } catch (err) {
-        if (controller.signal.aborted) setState({ status: 'idle' });
+        if (!mounted.current) return;
+        if (err instanceof ImportCancelled) setState({ status: 'idle' });
         else setState({ status: 'error', message: err instanceof Error ? err.message : String(err) });
+        onChanged();
       }
     },
-    [onImported],
+    [onImported, onChanged],
   );
 
+  useEffect(() => {
+    if (job) void start(job);
+  }, [job, start]);
+
   const chooseFolder = () => {
-    if (canPickFolder()) void run(pickFolder);
+    if (canPickFolder()) void start({ request: pickFolder });
     else folderInput.current?.click();
   };
   const onDrop = (e: DragEvent) => {
     e.preventDefault();
     setOver(false);
     if (busy) return;
-    const source = fromDrop(e.dataTransfer);
-    void run(() => source);
+    const request = fromDrop(e.dataTransfer);
+    void start({ request: () => request });
   };
 
   const p = state.status === 'saving' ? state.progress : null;
@@ -87,16 +100,16 @@ export function ImportCard({ onImported }: { onImported: (projectId: string) => 
         <h2>Import your own project</h2>
         <p>
           <span className="tok tok--c"># </span>
-          Choose a folder or a ZIP, or drop it here. It stays in this browser and is never run.
+          Choose a folder, a ZIP or a backup, or drop it here. It stays in this browser and is never run.
         </p>
         {busy ? (
           <div className="import-card__progress" role="status" aria-live="polite">
             <span className="import-card__what">
-              {state.status === 'reading' ? 'looking at the files…' : p ? `${p.done}/${p.total} files · ${formatBytes(p.bytes)}` : 'checking…'}
+              {state.status === 'reading' || !p ? 'looking at the files…' : `${p.done}/${p.total} files${p.bytes ? ` · ${formatBytes(p.bytes)}` : ''}${state.status === 'saving' ? ` · ${eta(p, state.startedAt)}` : ''}`}
             </span>
             <progress max={p?.total ?? 1} value={p?.done ?? undefined} aria-label="Import progress" />
             <span className="import-card__path">{p?.path ?? ''}</span>
-            <button type="button" className="btn btn--ghost" onClick={() => abort.current?.abort()}>
+            <button type="button" className="btn btn--ghost" onClick={() => run.current?.cancel()}>
               cancel
             </button>
           </div>
@@ -123,7 +136,7 @@ export function ImportCard({ onImported }: { onImported: (projectId: string) => 
           onChange={(e) => {
             const file = e.target.files?.[0];
             e.target.value = '';
-            if (file) void run(() => fromZip(file));
+            if (file) void start({ request: () => Promise.resolve({ kind: 'zip', file }) });
           }}
         />
         <input
@@ -135,10 +148,17 @@ export function ImportCard({ onImported }: { onImported: (projectId: string) => 
           onChange={(e) => {
             const files = [...(e.target.files ?? [])];
             e.target.value = '';
-            if (files.length > 0) void run(() => Promise.resolve(fromFileList(files)));
+            if (files.length > 0) void start({ request: () => Promise.resolve(requestFromFileList(files)) });
           }}
         />
       </div>
     </article>
   );
+}
+
+/** Time left, only when there is enough to measure. */
+function eta(p: ImportProgress, startedAt: number): string {
+  const elapsed = performance.now() - startedAt;
+  if (elapsed < 2000 || p.bytes < 1024 ** 2 || p.totalBytes <= p.bytes) return `${Math.round(elapsed / 1000)} s`;
+  return `about ${Math.max(1, Math.round(((p.totalBytes - p.bytes) * elapsed) / p.bytes / 1000))} s left`;
 }

@@ -10,6 +10,8 @@ import { Panel } from '../layout/Panel';
 import { EvidenceBadge } from './EvidenceBadge';
 import { SimulationExplanation } from './SimulationExplanation';
 import type { SimulationController } from '../visual-lab/useSimulationController';
+import type { ProjectAnalysis } from '../../app/useProjectAnalysis';
+import { FileUnderstanding } from './FileUnderstanding';
 import './ExplanationPanel.css';
 
 export interface ExplanationPanelProps {
@@ -17,6 +19,11 @@ export interface ExplanationPanelProps {
   readonly lineCount: number | null;
   readonly outline: FileOutline | null;
   readonly sim?: SimulationController;
+  readonly analysis?: ProjectAnalysis;
+  /** Selected line, for "used by". */
+  readonly line?: number | null;
+  readonly onGo?: (path: string, line: number) => void;
+  readonly notebookView?: { readonly raw: boolean; readonly toggle: () => void } | null;
   readonly onCollapse?: () => void;
 }
 
@@ -27,7 +34,7 @@ export interface ExplanationPanelProps {
  * original repository and the parsed outline. Operation explanations arrive
  * with the visual laboratory (Phase 2) and static analysis (Phase 3).
  */
-export function ExplanationPanel({ file, lineCount, outline, sim, onCollapse }: ExplanationPanelProps) {
+export function ExplanationPanel({ file, lineCount, outline, sim, onCollapse, analysis, line, onGo, notebookView }: ExplanationPanelProps) {
   const symbols = outline ? flattenOutline(outline.symbols) : [];
   const classes = symbols.filter((s) => s.kind === 'class').length;
   const functions = symbols.length - classes;
@@ -67,6 +74,15 @@ export function ExplanationPanel({ file, lineCount, outline, sim, onCollapse }: 
                 </Fact>
               ) : null}
             </dl>
+            {notebookView ? (
+              <p className="explain__muted">
+                {notebookView.raw ? 'The raw notebook file is shown.' : 'The cells are shown as Python text. Stored outputs are not used.'}{' '}
+                <button type="button" className="explain__link" onClick={notebookView.toggle}>
+                  {notebookView.raw ? 'show cells' : 'show raw file'}
+                </button>
+              </p>
+            ) : null}
+            {analysis && onGo ? <FileUnderstanding file={file} analysis={analysis} line={line ?? null} onGo={onGo} /> : null}
             {outline && outline.syntaxErrorCount > 0 ? (
               <p className="explain__warning">
                 <Icon name="alert" />

@@ -44,6 +44,7 @@ export const playgroundTheme = EditorView.theme({
     backgroundColor: 'var(--code-highlight-line)',
     boxShadow: 'inset 3px 0 0 var(--code-highlight-edge)',
   },
+  '.cm-cp-link': { textDecoration: 'underline dotted var(--color-text-faint)', textUnderlineOffset: '3px' },
   '.cm-cp-highlight-mark': {
     backgroundColor: 'var(--code-highlight-mark)',
     borderRadius: '3px',
@@ -114,6 +115,43 @@ export const highlightField = StateField.define<DecorationSet>({
         }
       }
       next = builder.finish();
+    }
+    return next;
+  },
+  provide: (field) => EditorView.decorations.from(field),
+});
+
+/* ------------------------------------------------------------------------ */
+/* Links: names that lead to a definition in the project.                   */
+/* ------------------------------------------------------------------------ */
+
+export interface CodeLink {
+  readonly line: number;
+  readonly from: number;
+  readonly to: number;
+  readonly title: string;
+}
+
+export const setLinks = StateEffect.define<readonly CodeLink[]>();
+
+export const linkField = StateField.define<DecorationSet>({
+  create: () => Decoration.none,
+  update(decorations, tr) {
+    let next = decorations.map(tr.changes);
+    for (const effect of tr.effects) {
+      if (!effect.is(setLinks)) continue;
+      const doc = tr.state.doc;
+      const marks = effect.value
+        .filter((l) => l.line >= 1 && l.line <= doc.lines)
+        .map((l) => {
+          const line = doc.line(l.line);
+          return { from: Math.min(line.from + l.from, line.to), to: Math.min(line.from + l.to, line.to), title: l.title };
+        })
+        .filter((m) => m.to > m.from);
+      next = Decoration.set(
+        marks.map((m) => Decoration.mark({ class: 'cm-cp-link', attributes: { title: m.title } }).range(m.from, m.to)),
+        true,
+      );
     }
     return next;
   },

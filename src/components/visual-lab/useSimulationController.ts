@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { callIndexSteps, type CallIndex } from '../../core/analysis/python/callIndex';
-import { parsePythonModule, type Module } from '../../core/parser/python/ast';
+import type { CallIndex } from '../../core/analysis/python/callIndex';
+import { parsePythonModule } from '../../core/parser/python/ast';
+import type { FileAnalysis } from '../../core/analysis/python/fileAnalysis';
+import { findModels, type ModelUse } from '../../core/models/detect';
 import { csvToDataFrame } from '../../core/simulation/csv';
-import { exampleRows, paramHints, type ParamHint, type ParamShape } from '../../core/simulation/paramShapes';
+import { exampleRows, paramHints, type ModuleLookup, type ParamHint, type ParamShape } from '../../core/simulation/paramShapes';
 import { simulate, type SimulationEntry } from '../../core/simulation/interpreter';
 import { parseLiteral } from '../../core/simulation/literal';
 import { definitionOf, findEditableInputs, findScenarios, type EditableInput, type ScenarioOption } from '../../core/simulation/scenarios';
@@ -80,14 +82,14 @@ export interface SimulationController {
   readonly speed: PlaybackSpeed;
   readonly setSpeed: (speed: PlaybackSpeed) => void;
   readonly callIndex: CallIndex | null;
+  /** Machine-learning models mentioned in each file. */
+  readonly models: ReadonlyMap<string, readonly ModelUse[]>;
   /** Increments whenever the user moves to a step (used to decide when to follow execution in the code panel). */
   readonly navigationSerial: number;
 }
 
 /** Base time per step at 1× speed, including the animation. */
 export const STEP_INTERVAL_MS = 1800;
-
-const NO_MODULES: ReadonlyMap<string, Module> = new Map();
 
 interface ParamSpec {
   readonly key: string;
@@ -113,50 +115,35 @@ export function useSimulationController(
   sources: ReadonlyMap<string, string> | null,
   dataFiles: ReadonlyMap<string, string> | null,
   currentFile: string | null,
+  /** Results of the background analysis so far. */
+  analyses: ReadonlyMap<string, FileAnalysis>,
+  callIndex: CallIndex | null,
 ): SimulationController {
-  // Analysis runs in short slices, so a large project does not freeze the page.
-  const [modules, setModules] = useState<ReadonlyMap<string, Module>>(NO_MODULES);
-  const [callIndex, setCallIndex] = useState<CallIndex | null>(null);
-  useEffect(() => {
-    setModules(NO_MODULES);
-    setCallIndex(null);
-    if (!sources) return;
-    let cancelled = false;
-    void (async () => {
-      let slice = performance.now();
-      const pause = async () => {
-        if (performance.now() - slice < 24) return;
-        await new Promise((r) => setTimeout(r));
-        slice = performance.now();
-      };
-      const map = new Map<string, Module>();
-      for (const [path, text] of sources) {
-        map.set(path, parsePythonModule(text));
-        await pause();
-        if (cancelled) return;
-      }
-      setModules(map);
-      const steps = callIndexSteps(sources);
-      for (;;) {
-        const r = steps.next();
-        if (r.done) {
-          setCallIndex(r.value);
-          return;
-        }
-        await pause();
-        if (cancelled) return;
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [sources]);
+  // Files are parsed on the page only when they are needed; the analysis of the whole project runs in workers.
+  const modules = useMemo<ModuleLookup>(
+    () => ({
+      get: (path) => {
+        const text = sources?.get(path);
+        return text === undefined ? undefined : parsePythonModule(text);
+      },
+      keys: () => sources?.keys() ?? [],
+    }),
+    [sources],
+  );
+  // The open file does not wait for its turn in the analysis.
+  const open = useMemo(() => {
+    if (!currentFile || analyses.has(currentFile)) return null;
+    const mod = modules.get(currentFile);
+    return mod ? { path: currentFile, scenarios: findScenarios(currentFile, mod), models: findModels(currentFile, mod) } : null;
+  }, [currentFile, analyses, modules]);
 
-  const allScenarios = useMemo(() => {
-    const out: ScenarioOption[] = [];
-    for (const [path, mod] of modules) out.push(...findScenarios(path, mod));
+  const models = useMemo(() => {
+    const out = new Map<string, readonly ModelUse[]>([...analyses.values()].map((a) => [a.path, a.models]));
+    if (open) out.set(open.path, open.models);
     return out;
-  }, [modules]);
+  }, [analyses, open]);
+
+  const allScenarios = useMemo(() => [...(open?.scenarios ?? []), ...[...analyses.values()].flatMap((a) => a.scenarios)], [analyses, open]);
 
   // Scripts from the whole project, plus functions and class methods of the open file.
   const scenarios = useMemo(
@@ -170,7 +157,8 @@ export function useSimulationController(
   // Pick a default once sources are ready: this file's script; else a script that calls into this
   // file (from the static call index); else a conventional entry point; else this file's first function.
   useEffect(() => {
-    if (scenarioId || allScenarios.length === 0 || !callIndex) return;
+    // Small projects wait for the call index, which knows the script that uses the open file.
+    if (scenarioId || allScenarios.length === 0 || (!callIndex && (sources?.size ?? 0) <= 12)) return;
     const scripts = allScenarios.filter((s) => s.kind === 'script' && s.isProgram);
     const here = allScenarios.filter((s) => s.path === currentFile);
     const callsIntoCurrent = (path: string) =>
@@ -184,13 +172,13 @@ export function useSimulationController(
       scripts.find((s) => s.path === currentFile) ??
       scripts.find((s) => callsIntoCurrent(s.path)) ??
       // In a project of many files, the open file's own function is the natural start.
-      (modules.size > 12 ? here.find((s) => s.kind !== 'script') : undefined) ??
+      ((sources?.size ?? 0) > 12 ? here.find((s) => s.kind !== 'script') : undefined) ??
       here.find((s) => s.kind === 'script') ??
       [...scripts].sort((a, b) => entryRank(a.path) - entryRank(b.path))[0] ??
       allScenarios.find((s) => s.path === currentFile) ??
       null;
     if (pick) setScenarioId(pick.id);
-  }, [allScenarios, currentFile, scenarioId, callIndex, modules]);
+  }, [allScenarios, currentFile, scenarioId, callIndex, sources]);
 
   const bestFor = useCallback(
     (path: string) => {
@@ -426,7 +414,7 @@ export function useSimulationController(
     else if (scenario.kind === 'method') {
       entry = { kind: 'method', path: scenario.path, className: scenario.className, method: scenario.method, initArgs: pick('init'), args: pick('call') };
     } else entry = { kind: 'function', path: scenario.path, name: scenario.name, args: pick('call') };
-    return simulate({ sources, dataFiles: allDataFiles }, entry, { overrides, choices });
+    return simulate({ sources, dataFiles: allDataFiles }, entry, { overrides, choices, maxMs: 2500 });
   }, [sources, allDataFiles, scenario, overrides, paramValues, choices]); // pick/specs derive from scenario + paramValues
 
   const missingPath = trace?.stop?.kind === 'missing-data' ? trace.stop.path ?? null : null;
@@ -501,7 +489,7 @@ export function useSimulationController(
   }, [playing, stepIndex, total, speed, goTo]);
 
   return {
-    ready: sources !== null && (modules.size > 0 || sources.size === 0),
+    ready: sources !== null,
     sources,
     scenarios,
     scenario,
@@ -537,6 +525,7 @@ export function useSimulationController(
     speed,
     setSpeed,
     callIndex,
+    models,
     navigationSerial,
   };
 }
