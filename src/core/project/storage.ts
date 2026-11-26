@@ -16,7 +16,11 @@ import { ofProject, openDatabase, readAll, readKeys, readOne, result, write } fr
 
 const BATCH_BYTES = 8 * 1024 ** 2;
 const BATCH_FILES = 100;
-const LOCK_WAIT_MS = 8000;
+/** The longest a closed tab may take to let go of its import (Chrome can take several seconds under load). */
+const LOCK_WAIT_MS = 30_000;
+/** A tab that still answers after this long is really importing, not closing. */
+const BUSY_AFTER_MS = 2000;
+const PING_MS = 500;
 
 export interface ProjectRecord {
   readonly id: string;
@@ -100,22 +104,46 @@ export async function checkSpace(needed: number): Promise<SpaceCheck> {
   return { needed, free, verdict: needed > free ? 'too-large' : needed > free * 0.8 ? 'tight' : 'fits' };
 }
 
-/** Holds a lock while importing, so that another tab does not "resume" a running import. */
+/**
+ * Holds a lock while importing, so that another tab does not "resume" a running import.
+ *
+ * The browser keeps the lock of a just-closed tab for a while (its worker no longer runs,
+ * but has not been torn down yet). To tell that apart from a tab that really is importing,
+ * the holder answers pings on a BroadcastChannel: a live holder makes us give up quickly,
+ * a silent one is waited for.
+ */
 async function locked<T>(id: string, work: () => Promise<T>): Promise<T> {
   if (!navigator.locks) return work();
-  // A tab that was just closed may need a moment to let go.
+  const name = `import:${id}`;
+  const channel = typeof BroadcastChannel === 'function' ? new BroadcastChannel(name) : null;
   const waiting = new AbortController();
-  const timer = setTimeout(() => waiting.abort(), LOCK_WAIT_MS);
+  const start = Date.now();
+  let answered = -Infinity;
+  let busy = false;
+  if (channel) channel.onmessage = (e: MessageEvent) => void (e.data === 'busy' && (answered = Date.now()));
+  const check = () => {
+    const now = Date.now();
+    if (now - start >= BUSY_AFTER_MS && now - answered < PING_MS * 2) {
+      busy = true;
+      waiting.abort();
+    } else if (now - start >= LOCK_WAIT_MS) waiting.abort();
+    else channel?.postMessage('ping');
+  };
+  const timer = setInterval(check, PING_MS);
+  channel?.postMessage('ping');
   try {
-    return (await navigator.locks.request(`import:${id}`, { signal: waiting.signal }, () => {
-      clearTimeout(timer);
+    return (await navigator.locks.request(name, { signal: waiting.signal }, () => {
+      clearInterval(timer);
+      // This tab is now the one importing: tell anyone who asks.
+      if (channel) channel.onmessage = (e: MessageEvent) => void (e.data === 'ping' && channel.postMessage('busy'));
       return work();
     })) as T;
   } catch (err) {
-    if (waiting.signal.aborted) throw new Error('This import is already running in another tab.');
+    if (waiting.signal.aborted) throw new Error(busy ? 'This import is already running in another tab.' : 'A closed tab has not let go of this import yet. Try again in a moment.');
     throw err;
   } finally {
-    clearTimeout(timer);
+    clearInterval(timer);
+    channel?.close();
   }
 }
 

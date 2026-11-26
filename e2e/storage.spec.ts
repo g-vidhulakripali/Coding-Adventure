@@ -33,7 +33,7 @@ test('an interrupted import continues where it stopped', async ({ page, context 
   files['big/main.py'] = 'x = 1\nprint(x)\n';
   const zip = makeZip(files, { store: true });
   await importZip(page, zip, 'big.zip');
-  await expect(page.locator('.import-card__what')).toContainText(/(1[2-9]\d|[23]\d\d)\/401 files/);
+  await expect(page.locator('.import-card__what')).toContainText(/(1[2-9]\d|[23]\d\d)\/401 files/, { timeout: 30_000 });
   await page.close({ runBeforeUnload: false });
 
   const next = await context.newPage();
@@ -49,6 +49,24 @@ test('an interrupted import continues where it stopped', async ({ page, context 
   await expect(next.locator('.file-explorer__summary')).toHaveText('401 files');
   await openFile(next, 'big/main.py');
   await expect(next.locator('.cm-content')).toContainText('print(x)');
+});
+
+test('an import still running in another tab is not resumed twice', async ({ page, context }) => {
+  test.setTimeout(120_000);
+  // Large enough that the first tab is still importing when the second one asks.
+  const files: Files = {};
+  // Many small files: slow to import, but light on the disk for tests running alongside.
+  for (let i = 0; i < 1500; i++) files[`big/f${i}.bin`] = randomBytes(20_000);
+  await importZip(page, makeZip(files, { store: true }), 'big.zip');
+  await expect(page.locator('.import-card__what')).toContainText(/[1-9]\d*\/1500 files/, { timeout: 30_000 });
+
+  const other = await context.newPage();
+  await other.goto('#/');
+  const started = Date.now();
+  await other.locator('.saved-list__open.is-unfinished').click();
+  await expect(other.getByRole('alert')).toContainText('already running in another tab', { timeout: 15_000 });
+  expect(Date.now() - started).toBeLessThan(10_000);
+  await expect(other).toHaveURL(/#\/$/);
 });
 
 test('cancelling an import leaves nothing behind', async ({ page }) => {
@@ -124,7 +142,7 @@ test('pausing and stopping the preparation works, and the rest is done later', a
   const files: Files = {};
   for (let i = 0; i < 150; i++) files[`many/m${i}.py`] = `def f${i}(x):\n    return x + ${i}\n\n`.repeat(40);
   await importZip(page, makeZip(files), 'many.zip');
-  await expect(page).toHaveURL(/#\/project\//);
+  await expect(page).toHaveURL(/#\/project\//, { timeout: 30_000 });
   await page.locator('.side-tabs [role=tab]').nth(3).click();
   const box = page.locator('.status-box');
   const stop = box.getByRole('button', { name: 'stop' });
